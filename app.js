@@ -275,7 +275,7 @@ function renderMustChange() {
 // ---------- the frame: header, menu, footer ----------
 // [link, label, short label for the phone tab bar, icon, badge]
 function navItems() {
-  if (S.user.role === 'sao') return [['#/', 'Dashboard', 'Home', 'home'], ['#/claims', 'All claims', 'Claims', 'list'], ['#/reviews', 'Reviews', 'Reviews', 'review', S._openReviews],
+  if (S.user.role === 'sao') return [['#/', 'Dashboard', 'Home', 'home'], ['#/claims', 'All claims', 'Claims', 'list'], ['#/reviews', 'Reviews', 'Reviews', 'review', S.openReviews],
     ['#/sponsors', 'Sponsors', 'Sponsors', 'grid'], ['#/admin', 'Admin', 'Admin', 'gear']];
   return [['#/', 'My sponsors', 'Sponsors', 'home'], ['#/add', 'Add sponsor', 'Add', 'plus'], ['#/requests', 'Requests to SAO', 'Requests', 'chat']];
 }
@@ -685,7 +685,7 @@ async function delClub(club, repCount) {
 // ================= SAO pages =================
 async function viewDashboard() {
   const d = await GET('/api/dashboard');
-  S._openReviews = d.openReviews + d.openRequests;
+  S.openReviews = d.openReviews + d.openRequests;
   const bs = d.byStatus;
   const kp = (n, t, href, cls = '') => `<a class="kpi ${cls}" href="${href}"><b>${n}</b><span>${t}</span></a>`;
   const colors = { reserved: 'var(--info-fg)', contacted: 'var(--yellow)', negotiation: '#C9A800', confirmed: 'var(--ink)', pending_review: 'var(--red)' };
@@ -746,7 +746,7 @@ async function viewReviews() {
   const dups = all.filter(r => r.kind === 'duplicate' && r.state === 'open');
   const reqs = all.filter(r => r.kind === 'request' && r.state === 'open');
   const closed = all.filter(r => r.state !== 'open');
-  S._openReviews = dups.length + reqs.length;
+  S.openReviews = dups.length + reqs.length;
   const tabs = `<nav class="tabs" aria-label="Reviews">
     <a href="#/reviews" class="${tab === 'duplicates' ? 'on' : ''}">Possible duplicates${dups.length ? `<span class="count">${dups.length}</span>` : ''}</a>
     <a href="#/reviews?tab=requests" class="${tab === 'requests' ? 'on' : ''}">Club requests${reqs.length ? `<span class="count">${reqs.length}</span>` : ''}</a>
@@ -768,7 +768,8 @@ async function viewReviews() {
       <div class="row" style="margin-top:14px">${r.sponsorId ? `<button class="btn ghost" data-assign="${esc(r.sponsorId)}" data-holder="${esc(r.holder ? S.clubs.find(c => c.name === r.holder.club)?.id || '' : '')}">Assign to ${esc(r.club)}</button>` : ''}
         <button class="btn key" data-reply>Reply and close</button><span class="spacer"></span><button class="icon-act" data-del-review aria-label="Delete" title="Delete">${svg('trash')}</button></div></div>`;
   const closedRow = r => `<li data-id="${esc(r.id)}"><div class="grow"><span class="nm">${esc(r.sponsorName)}</span> <span class="tag">${r.kind === 'request' ? 'Request' : 'Duplicate'}</span>
-      <div class="muted small">${esc(r.club)} · ${esc(r.resolution || '')} by ${esc(r.resolvedBy || '')} ${r.resolvedAt ? date(r.resolvedAt) : ''}${r.reason ? ' · ' + esc(r.reason) : ''}</div></div>
+      <div class="muted small">${esc(r.club)} · ${esc({ approved: 'Approved', merged: 'Matched to an existing sponsor', 'merged-unavailable': 'Matched — sponsor unavailable',
+        rejected: 'Rejected', answered: 'Answered', closed: 'Closed' }[r.resolution] || r.resolution || '')} by ${esc(r.resolvedBy || 'the club')} ${r.resolvedAt ? date(r.resolvedAt) : ''}${r.reason ? ' · ' + esc(r.reason) : ''}</div></div>
       ${r.claimId ? `<a class="small" href="#/claim/${esc(r.claimId)}">Claim</a>` : ''}<button class="icon-act" data-del-review aria-label="Delete" title="Delete">${svg('trash')}</button></li>`;
   $('#main').innerHTML = `<div class="page-head"><div><h1>Reviews</h1><p class="muted">Names that look like an existing sponsor, and clubs asking SAO to step in.</p></div></div>
     ${tabs}
@@ -936,11 +937,34 @@ async function viewAdmin(tab) {
     let offset = 0;
     main.innerHTML = head + `<div class="card flush"><div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>Change</th><th>Reason</th></tr></thead><tbody id="log"></tbody></table></div>
       <div style="padding:14px 20px"><button class="btn ghost" id="more">Load more</button></div></div>`;
-    const short = o => o ? esc(Object.entries(o).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : typeof v === 'object' && v ? JSON.stringify(v) : v}`).join(' · ')) : '';
+    // Plain-English names for the log's codes and fields; ids and empty values are left out
+    const ACT = { login: 'Signed in', setup: 'Set up the site', 'claim.reserve': 'Reserved a sponsor', 'claim.hold': 'Look-alike sent to review',
+      'claim.blocked': 'Tried an unavailable sponsor', 'claim.status': 'Changed a status', 'claim.note': 'Added a note', 'claim.release': 'Released a claim',
+      'claim.extend': 'Extended a reservation', 'claim.assign': 'Assigned a sponsor', 'claim.reassign': 'Reassigned a sponsor', 'claim.expire': 'Reservation ended',
+      'claim.delete': 'Deleted a sponsor claim', 'sponsor.create': 'New sponsor in the registry', 'sponsor.edit': 'Edited a sponsor', 'sponsor.merge': 'Merged sponsors',
+      'sponsor.delete': 'Deleted a sponsor', 'review.approve': 'Approved a look-alike', 'review.merge': 'Matched a look-alike', 'review.reject': 'Rejected a look-alike',
+      'review.delete': 'Deleted a review item', 'request.create': 'Asked SAO', 'request.answer': 'Answered a request', 'user.create': 'Added an account',
+      'user.edit': 'Edited an account', 'user.password': 'Changed own password', 'user.delete': 'Deleted an account', 'club.create': 'Added a club',
+      'club.edit': 'Edited a club', 'club.logo': 'Uploaded a club logo', 'club.logo.remove': 'Removed a club logo', 'club.delete': 'Deleted a club',
+      'category.create': 'Added a category', 'category.edit': 'Edited a category', 'category.delete': 'Deleted a category', 'settings.edit': 'Changed the rules',
+      export: 'Exported CSV', 'clubs.sync': 'Clubs and logos updated' };
+    const FIELD = { categoryId: 'category', clubId: 'club', firstContact: 'first contact', expiresAt: 'ends', stallDays: 'stalled after (days)',
+      maxActive: 'sponsor limit', passwordReset: 'password reset', targetId: 'matched to' };
+    const val = (k, v) => {
+      if (k === 'categoryId') return (S.categories.find(c => c.id === v) || {}).name || '';
+      if (k === 'clubId') return clubName(v);
+      if (k === 'status') return label(v);
+      if (k === 'expiresAt') return v ? dateTime(v) : '';
+      if (typeof v === 'boolean') return v ? 'yes' : 'no';
+      if (Array.isArray(v)) return v.join(', ');
+      return typeof v === 'object' && v ? '' : String(v);
+    };
+    const short = o => o ? esc(Object.entries(o).filter(([k, v]) => v != null && v !== '' && !['claim', 'targetId', 'id'].includes(k))
+      .map(([k, v]) => [FIELD[k] || k, val(k, v)]).filter(([, v]) => v !== '').map(([k, v]) => `${k}: ${v}`).join(' · ')) : '';
     const more = async () => {
       const rows = await GET('/api/audit?offset=' + offset); offset += rows.length;
       $('#log').insertAdjacentHTML('beforeend', rows.map(a => `<tr><td class="first"><span class="sub">${dateTime(a.at)}</span></td><td data-l="Who">${esc(a.by)}</td>
-        <td data-l="What"><b>${esc(a.action)}</b><div class="sub">${esc(a.record || '')}</div></td>
+        <td data-l="What"><b>${esc(ACT[a.action] || a.action)}</b></td>
         <td data-l="Change" class="small">${a.before ? `<span class="muted">${short(a.before)}</span> → ` : ''}${short(a.after)}</td><td data-l="Reason" class="small">${esc(a.reason || '')}</td></tr>`).join(''));
       $('#more').hidden = rows.length < 100;
     };

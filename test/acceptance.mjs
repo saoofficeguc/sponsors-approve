@@ -253,6 +253,26 @@ test('SAO deletes sponsors, accounts, clubs, categories; clubs cannot', async ()
   assert.equal((await call('POST', `/api/users/${me}/delete`, null, sao)).status, 400);
 });
 
+test('a rejected or withdrawn look-alike name does not stay behind as a free sponsor', async () => {
+  await call('POST', '/api/claims', { name: 'Starbright Coffee', categoryId: cats.Other }, A);
+  // SAO rejects a look-alike
+  const held = (await call('POST', '/api/claims', { name: 'Starbright Coffee Egypt', categoryId: cats.Other }, B)).data;
+  assert.equal(held.result, 'review');
+  const rv = (await call('GET', '/api/reviews', null, sao)).data.find(r => r.claimId === held.claimId);
+  assert.equal((await call('POST', `/api/reviews/${rv.id}/resolve`, { action: 'reject', reason: 'Same brand' }, sao)).status, 200);
+  assert.equal((await call('POST', '/api/claims', { name: 'Starbright Coffee Egypt', categoryId: cats.Other }, C)).data.result, 'review');
+  // a club withdraws its own look-alike request
+  const mine = (await call('GET', '/api/claims?status=pending_review', null, C)).data.find(x => x.sponsor === 'Starbright Coffee Egypt');
+  assert.equal((await call('POST', `/api/claims/${mine.id}/status`, { status: 'released' }, C)).status, 200);
+  assert.equal((await call('POST', '/api/claims', { name: 'Starbright Coffee Egypt', categoryId: cats.Other }, B)).data.result, 'review');
+  // the closed requests keep their history
+  assert.equal((await call('GET', '/api/claims/' + held.claimId, null, B)).data.claim.sponsor, 'Starbright Coffee Egypt');
+  // an approved one stays a normal sponsor
+  const again = (await call('GET', '/api/reviews', null, sao)).data.find(r => r.state === 'open' && r.sponsorName === 'Starbright Coffee Egypt');
+  assert.equal((await call('POST', `/api/reviews/${again.id}/resolve`, { action: 'approve', reason: 'Different company' }, sao)).status, 200);
+  assert.equal((await call('POST', '/api/claims', { name: 'Starbright Coffee Egypt', categoryId: cats.Other }, C)).data.error, 'This sponsor is currently unavailable.');
+});
+
 test('the logo update fills missing logos only, and keeps an uploaded one', async () => {
   const { createDb } = await import('../supabase/functions/_shared/core/db.mjs');
   const { syncClubs } = await import('../supabase/functions/_shared/core/setup.mjs');

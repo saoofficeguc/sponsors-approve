@@ -222,13 +222,21 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     await audit(actor, 'sponsor.create', `sponsor:${id}`, null, { name, categoryId, instagram: handle || null });
     return id;
   }
-  async function closeClaim(c, status, reason, actor, text) {
+  // keepName: SAO is about to assign this same sponsor, so a look-alike name it created stays in the registry
+  async function closeClaim(c, status, reason, actor, text, { keepName = false } = {}) {
     await q('UPDATE sp_claims SET status = $1, active = 0, closed_at = $2, close_reason = $3, last_activity_at = $2 WHERE id = $4',
       [status, now(), reason, c.id]);
     await event(c.id, actor, status, c.status, status, text || reason);
-    if (c.status === 'pending_review')
+    if (c.status === 'pending_review') {
+      // A look-alike name that was never approved leaves the registry, so the next club typing it is checked again
+      // (otherwise it would match this leftover record exactly and skip SAO's review).
+      const rv = await one(`SELECT detail, sponsor_id FROM sp_reviews WHERE claim_id = $1 AND state = 'open' AND kind = 'duplicate'`, [c.id]);
+      const provisional = rv && !(rv.detail && JSON.parse(rv.detail).conflict) && rv.sponsor_id === c.sponsor_id;
+      const others = Number((await one('SELECT COUNT(*) AS n FROM sp_claims WHERE sponsor_id = $1 AND id <> $2', [c.sponsor_id, c.id]))?.n || 0);
+      if (provisional && !others && !keepName) await q(`UPDATE sp_sponsors SET state = 'rejected' WHERE id = $1 AND state = 'active'`, [c.sponsor_id]);
       await q(`UPDATE sp_reviews SET state = 'closed', resolved_at = $1, resolved_by = $2, resolution = 'closed', reason = $3
         WHERE claim_id = $4 AND state = 'open'`, [now(), actor?.id || null, reason, c.id]);
+    }
   }
 
   // Put sponsor `fromId` into `toId`: its name becomes another name of the target, and its history moves there
@@ -266,6 +274,8 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
       user: { id: user.id, name: user.name, email: user.email, role: user.role, clubId: user.club_id, mustChange: !!Number(user.must_change) },
       clubs: clubs.map(clubOut), categories: categories.map(c => ({ ...c, active: !!Number(c.active) })),
       statuses: STATUS, reserveDays: RESERVE_DAYS, settings: await settings(), unread, today: localDate(now()),
+      // SAO: how many review items wait, for the count on the Reviews menu
+      openReviews: user.role === 'sao' ? Number((await one(`SELECT COUNT(*) AS n FROM sp_reviews WHERE state = 'open'`))?.n || 0) : undefined,
     };
   });
 
@@ -600,7 +610,7 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     let fromClub = null;
     if (cur) {
       fromClub = (await one('SELECT name FROM sp_clubs WHERE id = $1', [cur.club_id]))?.name;
-      await closeClaim(cur, 'released', `Released by SAO: ${reason}`, user, `Released by SAO: ${reason}`);
+      await closeClaim(cur, 'released', `Released by SAO: ${reason}`, user, `Released by SAO: ${reason}`, { keepName: true });
       await notifyClub(cur.club_id, `SAO released your claim on ${s.name}: ${reason}`, `#/claim/${cur.id}`);
     }
     const id = await newClaim({ sponsorId: s.id, clubId: club.id, status, actor: user, firstContact: first,
