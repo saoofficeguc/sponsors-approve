@@ -43,11 +43,18 @@ Statuses: Reserved → Contacted → In Negotiation → Confirmed, or Rejected (
 **Club Representative** — My sponsors (own list, filters, deadlines), Add sponsor (live suggestions showing
 Available / Unavailable, category, optional Instagram with link check), update status and first-contact date, notes,
 history, and *Ask SAO to review* for an unavailable sponsor. In-site notifications.
+**Delete** (bin icon on the list, or on the sponsor's page) erases the club's sponsor completely — its notes, history
+and log entries, for everyone including SAO — and frees the sponsor for other clubs. A club can only delete its own.
 
 **SAO Head** — Dashboard (all clubs with their logos, counts by status, ending soon, stalled, recent activity), All claims with
 filters and CSV export, Reviews (possible duplicates and club requests), Sponsor registry (rename, other names, Instagram,
 merge, assign/reassign to a club), Admin (people, clubs, categories, the stalled-claim rule, full audit log).
 Release, reassign and extend always need a reason, which is logged.
+SAO can **delete anything** for good: any claim, a sponsor (with all claims on it), an account, a club (with its claims and
+rep accounts — turn a club off instead to keep its history), a category (its sponsors move to "Other") and review items.
+Each delete asks for confirmation and leaves one line in the audit log.
+
+On phones the menu is a tab bar at the bottom, and lists show as cards.
 
 Accounts: SAO adds each person with a starting password; they must choose their own on first sign-in.
 8 wrong passwords lock that email for 15 minutes.

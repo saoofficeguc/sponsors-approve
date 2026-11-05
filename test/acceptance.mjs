@@ -217,6 +217,42 @@ test('a club can hold at most 20 sponsors at once (SAO can change it)', async ()
   await call('POST', '/api/settings', { maxActive: 20 }, sao);
 });
 
+test('a rep deletes their own sponsor completely; never another club\'s', async () => {
+  const id = (await call('POST', '/api/claims', { name: 'Gone Forever Ltd', categoryId: cats.Other, notes: 'secret note' }, A)).data.claimId;
+  await call('POST', `/api/claims/${id}/note`, { text: 'another note' }, A);
+  assert.equal((await call('POST', `/api/claims/${id}/delete`, null, B)).status, 403);
+  assert.equal((await call('POST', `/api/claims/${id}/delete`, null, A)).status, 200);
+  assert.equal((await call('GET', '/api/claims/' + id, null, sao)).status, 403);
+  const all = JSON.stringify((await call('GET', '/api/sponsors', null, sao)).data) + JSON.stringify((await call('GET', '/api/audit', null, sao)).data);
+  assert.ok(!all.includes('Gone Forever') && !all.includes('secret note'));
+  // the sponsor is free again for anyone
+  assert.equal((await call('POST', '/api/claims', { name: 'Gone Forever Ltd', categoryId: cats.Other }, B)).data.result, 'reserved');
+});
+
+test('SAO deletes sponsors, accounts, clubs, categories; clubs cannot', async () => {
+  const sp = (await call('GET', '/api/sponsors', null, sao)).data.find(s => s.name === 'Gone Forever Ltd');
+  assert.equal((await call('POST', `/api/sponsors/${sp.id}/delete`, null, A)).status, 403);
+  assert.equal((await call('POST', `/api/sponsors/${sp.id}/delete`, null, sao)).status, 200);
+  assert.ok(!(await call('GET', '/api/claims', null, B)).data.some(c => c.sponsor === 'Gone Forever Ltd'));
+  // a category: its sponsors move to "Other"
+  const tmpCat = (await call('POST', '/api/categories', { name: 'Temporary Cat' }, sao)).data.id;
+  await call('POST', '/api/claims', { name: 'Category Mover Co', categoryId: tmpCat }, B);
+  assert.equal((await call('POST', `/api/categories/${tmpCat}/delete`, null, sao)).status, 200);
+  assert.equal((await call('GET', '/api/sponsors', null, sao)).data.find(s => s.name === 'Category Mover Co').category, 'Other');
+  // a club with its accounts and claims
+  const club = (await call('POST', '/api/clubs', { name: 'Short Lived Club' }, sao)).data.id;
+  await call('POST', '/api/users', { name: 'Rep E', email: 'e@club.test', role: 'rep', clubId: club, password: 'Start1234' }, sao);
+  const E = await login('e@club.test');
+  await call('POST', '/api/claims', { name: 'Club Bound Sponsor', categoryId: cats.Other }, E);
+  assert.equal((await call('POST', `/api/clubs/${club}/delete`, null, sao)).status, 200);
+  assert.equal((await call('GET', '/api/claims', null, E)).status, 401);   // the account is gone
+  assert.ok(!(await call('GET', '/api/users', null, sao)).data.some(u => u.email === 'e@club.test'));
+  assert.ok(!(await call('GET', '/api/sponsors', null, sao)).data.some(s => s.name === 'Club Bound Sponsor'));
+  // SAO cannot delete themself
+  const me = (await call('GET', '/api/session', null, sao)).data.user.id;
+  assert.equal((await call('POST', `/api/users/${me}/delete`, null, sao)).status, 400);
+});
+
 test('the logo update fills missing logos only, and keeps an uploaded one', async () => {
   const { createDb } = await import('../supabase/functions/_shared/core/db.mjs');
   const { syncClubs } = await import('../supabase/functions/_shared/core/setup.mjs');

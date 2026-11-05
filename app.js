@@ -72,6 +72,18 @@ const I = {
   warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.5v.01"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/>',
   ig: '<rect x="4" y="4" width="16" height="16" rx="5"/><circle cx="12" cy="12" r="3.8"/><path d="M17 7v.01"/>',
+  home: '<path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  chat: '<path d="M20 12a7.5 7.5 0 0 1-11 6.6L4 20l1.4-4.6A7.5 7.5 0 1 1 20 12z"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+  review: '<path d="M12 3.5l8.5 8.5-8.5 8.5L3.5 12z"/><path d="M9 12l2 2 4-4"/>',
+  grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  trash: '<path d="M4.5 7h15M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4.5h6V7"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
+  out: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/>',
+  back: '<path d="M15 6l-6 6 6 6"/>',
 };
 const svg = (name, cls = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" class="${cls}">${I[name] || ''}</svg>`;
 const label = st => (S && S.statuses && S.statuses[st]) || st;
@@ -148,41 +160,31 @@ function shrink(file) {
     img.src = url;
   });
 }
+// Ask before deleting for good, then call the server
+function confirmDelete({ title, text, url, done }) {
+  dialog({ title, intro: text + ' <b>This cannot be undone.</b>', body: '', submit: 'Delete', danger: true,
+    onSubmit: async () => { await POST(url); toast('Deleted'); if (done) done(); else render(); } });
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-del-claim]');
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  const sao = S.user.role === 'sao';
+  confirmDelete({ title: `Delete ${b.dataset.name}?`, url: `/api/claims/${b.dataset.delClaim}/delete`,
+    text: sao ? 'The claim, its notes and its history are erased. If no other club ever had this sponsor, the sponsor record goes too.'
+      : 'It is removed from your club\'s list with its notes and history, for everyone including SAO, and the sponsor becomes free for other clubs.' });
+}, true);
+const delBtn = c => `<button class="icon-act" data-del-claim="${esc(c.id)}" data-name="${esc(c.sponsor)}" aria-label="Delete ${esc(c.sponsor)}" title="Delete">${svg('trash')}</button>`;
 const empty = (title, text = '') => `<div class="empty"><b>${esc(title)}</b>${esc(text)}</div>`;
 
 // ---------- start ----------
-function playIntro() {
-  if (store.get('sp-intro-seen') === '1') return Promise.resolve();
-  store.set('sp-intro-seen', '1');
-  const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const el = document.createElement('div');
-  el.className = 'intro' + (reduced ? ' still' : ''); el.setAttribute('role', 'presentation');
-  el.innerHTML = `<div class="intro-stage">
-      <svg viewBox="0 0 120 120" width="170" height="170" aria-hidden="true">
-        <rect class="l" x="34" y="30" width="52" height="70" rx="10" fill="#E31E24"/>
-        <rect class="r" x="34" y="30" width="52" height="70" rx="10" fill="#FFD500"/>
-        <g class="f"><rect x="34" y="26" width="52" height="74" rx="10" fill="#FFFFFF" stroke="#121212" stroke-width="3"/>
-          <path class="c" d="M47 63 L56 72 L73 52" fill="none" stroke="#121212" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g>
-      </svg>
-      <div class="wm">SAO</div><div class="bars"><span></span><span></span><span></span></div>
-      <div class="sub"><div>Student Activities Office</div><div lang="ar" dir="rtl">مكتب الأنشطة الطلابية</div></div>
-      <div class="tag">Sponsors — one club each, sorted.</div>
-    </div><div class="intro-foot">German University in Cairo</div>`;
-  document.body.appendChild(el);
-  return new Promise(resolve => {
-    let done = false;
-    const finish = () => { if (done) return; done = true; el.classList.add('out'); setTimeout(() => el.remove(), 450); resolve(); };
-    el.addEventListener('click', finish); setTimeout(finish, reduced ? 1200 : 2800);
-  });
-}
-const lockup = `<div class="login-head"><img src="assets/brand/sao-mark-color.svg" alt="">
+const lockup = `<div class="login-head"><img src="assets/brand/sponsors-mark.svg" alt="">
   <div class="lockup"><b>SAO</b><span class="brand-bars" aria-hidden="true"><i></i><i></i><i></i></span><span>Sponsor Registry</span>
   <span class="ar" lang="ar" dir="rtl">مكتب الأنشطة الطلابية</span></div></div>`;
 
 async function loadSession() { S = await GET('/api/session'); return S; }
 
 async function boot() {
-  await playIntro();
   let s;
   try { s = await loadSession(); }
   catch (e) {
@@ -271,33 +273,33 @@ function renderMustChange() {
 }
 
 // ---------- the frame: header, menu, footer ----------
+// [link, label, short label for the phone tab bar, icon, badge]
 function navItems() {
-  if (S.user.role === 'sao') return [['#/', 'Dashboard'], ['#/claims', 'All claims'], ['#/reviews', 'Reviews', S._openReviews], ['#/sponsors', 'Sponsors'], ['#/admin', 'Admin']];
-  return [['#/', 'My sponsors'], ['#/add', 'Add sponsor'], ['#/requests', 'Requests to SAO']];
+  if (S.user.role === 'sao') return [['#/', 'Dashboard', 'Home', 'home'], ['#/claims', 'All claims', 'Claims', 'list'], ['#/reviews', 'Reviews', 'Reviews', 'review', S._openReviews],
+    ['#/sponsors', 'Sponsors', 'Sponsors', 'grid'], ['#/admin', 'Admin', 'Admin', 'gear']];
+  return [['#/', 'My sponsors', 'Sponsors', 'home'], ['#/add', 'Add sponsor', 'Add', 'plus'], ['#/requests', 'Requests to SAO', 'Requests', 'chat']];
 }
+const initials = n => String(n || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+const isDark = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
 function frame() {
   const path = location.hash.split('?')[0] || '#/';
   const top = path.split('/').slice(0, 2).join('/');
   const isOn = href => href === '#/' ? (path === '#/' || path === '#' || path === '') : (top === href || (href === '#/claims' && top === '#/club'));
-  const club = S.user.role === 'rep' ? clubName(S.user.clubId) : 'SAO Head';
+  const items = navItems();
+  const cur = h => isOn(h) ? 'class="on" aria-current="page"' : '';
   $('#app').innerHTML = `
     <header class="top"><div class="top-in">
-      <a class="brand" href="#/"><img src="assets/brand/sao-mark-reversed.svg" alt=""><div><b>SAO Sponsors</b><span>Student Activities Office</span></div></a>
-      <nav class="nav" aria-label="Main">${navItems().map(([h, t, n]) => `<a href="${h}" class="${isOn(h) ? 'on' : ''}" ${isOn(h) ? 'aria-current="page"' : ''}>${t}${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>
+      <a class="brand" href="#/" aria-label="SAO Sponsors home"><img src="assets/brand/sponsors-mark.svg" alt=""><b>SAO <span>Sponsors</span></b></a>
+      <nav class="nav" aria-label="Main">${items.map(([h, t, , , n]) => `<a href="${h}" ${cur(h)}>${t}${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>
       <div class="top-tools">
-        <div class="who"><b>${esc(S.user.name)}</b>${esc(club)}</div>
         <button class="icon-btn" id="bell" aria-label="Notifications">${svg('bell')}<span class="dot" ${S.unread ? '' : 'hidden'}>${S.unread || ''}</span></button>
-        <button class="icon-btn" id="theme" aria-label="Switch light or dark">${svg('moon')}</button>
-        <button class="icon-btn" id="me" aria-label="Account">${svg('user')}</button>
+        <button class="icon-btn" id="me" aria-label="Account: ${esc(S.user.name)}"><span class="avatar">${esc(initials(S.user.name))}</span></button>
       </div>
     </div></header>
     <main id="main"></main>
-    <footer class="guc-foot"><img src="assets/guc-logo.jpg" alt="German University in Cairo"><span>SAO Sponsor Registry · German University in Cairo · Times shown in Cairo time</span></footer>`;
+    <nav class="tabbar" aria-label="Main">${items.map(([h, , short, ic, n]) => `<a href="${h}" ${isOn(h) ? 'aria-current="page"' : ''} class="${h === '#/add' ? 'add' : ''} ${isOn(h) ? 'on' : ''}">${svg(ic, 'ic')}<span>${short}</span>${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>
+    <footer class="foot"><img src="assets/guc-logo.jpg" alt="German University in Cairo"><span>Student Activities Office · Times in Cairo time</span></footer>`;
   $('#bell').onclick = openNotices;
-  $('#theme').onclick = () => {
-    const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-    document.documentElement.dataset.theme = dark ? 'light' : 'dark'; store.set('sp-theme', dark ? 'light' : 'dark');
-  };
   $('#me').onclick = openAccount;
 }
 function updateBell() { const d = $('#bell .dot'); if (d) { d.hidden = !S.unread; d.textContent = S.unread || ''; } }
@@ -323,9 +325,12 @@ function openAccount() {
   if ($('.pop.account')) return closePop();
   closePop();
   const p = document.createElement('div'); p.className = 'pop account';
-  p.innerHTML = `<div class="pop-head"><div><b>${esc(S.user.name)}</b><div class="muted small">${esc(S.user.email)}</div></div></div>
-    <button class="pop-btn" id="pw-btn">Change password</button><button class="pop-btn" id="out-btn">Sign out</button>`;
+  const where = S.user.role === 'rep' ? clubName(S.user.clubId) : 'SAO Head';
+  p.innerHTML = `<div class="pop-head"><div><b>${esc(S.user.name)}</b><div class="muted small">${esc(where)} · ${esc(S.user.email)}</div></div></div>
+    <button class="pop-btn" id="theme-btn">${svg(isDark() ? 'sun' : 'moon', 'ic')}${isDark() ? 'Light mode' : 'Dark mode'}</button>
+    <button class="pop-btn" id="pw-btn">${svg('key', 'ic')}Change password</button><button class="pop-btn" id="out-btn">${svg('out', 'ic')}Sign out</button>`;
   $('.top').appendChild(p);
+  $('#theme-btn').onclick = () => { const t = isDark() ? 'light' : 'dark'; document.documentElement.dataset.theme = t; store.set('sp-theme', t); closePop(); };
   $('#pw-btn').onclick = () => { closePop(); dialog({ title: 'Change password', submit: 'Save password',
     body: field('Current password', '<input class="input" type="password" name="current" required autocomplete="current-password">') +
       field('New password', '<input class="input" type="password" name="next" required autocomplete="new-password">', 'At least 8 characters, with letters and numbers. You stay signed in here; other devices are signed out.'),
@@ -370,16 +375,16 @@ window.addEventListener('hashchange', render);
 const refresh = async () => { await loadSession(); render(); };
 
 // ---------- claims table (used on several pages) ----------
-function claimsTable(list, { club = false } = {}) {
+function claimsTable(list, { club = false, del = true } = {}) {
   if (!list.length) return empty('No sponsors match', 'Try other filters.');
-  return `<div class="table-wrap"><table class="stackable"><thead><tr><th>Sponsor</th>${club ? '<th>Club</th>' : ''}<th>Category</th><th>Status</th><th>Deadline</th><th>Last activity</th></tr></thead><tbody>
+  return `<div class="table-wrap"><table class="stackable"><thead><tr><th>Sponsor</th>${club ? '<th>Club</th>' : ''}<th>Category</th><th>Status</th><th>Deadline</th><th>Last activity</th>${del ? '<th><span class="sr">Delete</span></th>' : ''}</tr></thead><tbody>
     ${list.map(c => `<tr class="go" data-href="#/claim/${esc(c.id)}">
       <td class="first"><a class="nm" href="#/claim/${esc(c.id)}">${esc(c.sponsor)}</a>${c.instagram ? `<div class="sub">@${esc(c.instagram)}</div>` : ''}</td>
-      ${club ? `<td data-l="Club"><span class="club-cell">${logo(clubOf(c.clubId), 24)}${esc(c.club || '')}</span></td>` : ''}
-      <td data-l="Category">${esc(c.category)}</td>
-      <td>${chip(c.status)}${c.stalled ? ' <span class="tag">Stalled</span>' : ''}</td>
+      ${club ? `<td data-l="Club" class="clubtd"><span class="club-cell">${logo(clubOf(c.clubId), 24)}${esc(c.club || '')}</span></td>` : ''}
+      <td data-l="Category" class="hide-sm">${esc(c.category)}</td>
+      <td class="st">${chip(c.status)}${c.stalled ? ' <span class="tag">Stalled</span>' : ''}</td>
       <td data-l="Deadline">${deadline(c)}</td>
-      <td data-l="Last activity"><span class="sub">${ago(c.lastActivityAt)}</span></td></tr>`).join('')}
+      <td data-l="Last activity" class="hide-sm"><span class="sub">${ago(c.lastActivityAt)}</span></td>${del ? `<td class="act">${delBtn(c)}</td>` : ''}</tr>`).join('')}
   </tbody></table></div>`;
 }
 document.addEventListener('click', e => {
@@ -397,12 +402,18 @@ function filteredClaims(container, { fixed = {}, club = false, exportBtn = false
   container.innerHTML = `<form class="filters" role="search">
       <input class="input grow" name="q" type="search" placeholder="Search sponsor" value="${esc(p.get('q') || '')}" aria-label="Search sponsor">
       ${statusFilter(p.get('status') || '')}
-      <select class="input" name="category" aria-label="Category">${opts(S.categories, p.get('category') || '', 'All categories')}</select>
-      ${sao && !fixed.club ? `<select class="input" name="club" aria-label="Club">${opts(S.clubs, p.get('club') || '', 'All clubs')}</select>` : ''}
-      ${sao ? `<input class="input" type="date" name="from" value="${esc(p.get('from') || '')}" aria-label="Added from"><input class="input" type="date" name="to" value="${esc(p.get('to') || '')}" aria-label="Added until">` : ''}
-      ${exportBtn ? '<button type="button" class="btn ghost" id="csv">Export CSV</button>' : ''}
+      <button type="button" class="btn ghost flt-toggle" aria-expanded="false">Filters</button>
+      <select class="input opt" name="category" aria-label="Category">${opts(S.categories, p.get('category') || '', 'All categories')}</select>
+      ${sao && !fixed.club ? `<select class="input opt" name="club" aria-label="Club">${opts(S.clubs, p.get('club') || '', 'All clubs')}</select>` : ''}
+      ${sao ? `<input class="input opt" type="date" name="from" value="${esc(p.get('from') || '')}" aria-label="Added from" title="Added from"><input class="input opt" type="date" name="to" value="${esc(p.get('to') || '')}" aria-label="Added until" title="Added until">` : ''}
+      ${exportBtn ? '<button type="button" class="btn ghost opt" id="csv">Export CSV</button>' : ''}
     </form><div class="list-body"><p class="muted" style="padding:20px">Loading…</p></div>`;
   const form = $('form', container);
+  // phones: extra filters fold away behind a "Filters" button (opened already if one is in use)
+  const used = ['category', 'club', 'from', 'to'].some(k => p.get(k));
+  if (used) form.classList.add('open');
+  const tg = $('.flt-toggle', form); tg.setAttribute('aria-expanded', String(used));
+  tg.onclick = () => { const o = form.classList.toggle('open'); tg.setAttribute('aria-expanded', String(o)); };
   const params = () => { const v = new URLSearchParams(); for (const [k, x] of new FormData(form)) if (x) v.set(k, x); for (const [k, x] of Object.entries(fixed)) v.set(k, x); return v; };
   const load = async () => {
     const v = params();
@@ -436,20 +447,20 @@ async function viewMyClub() {
   const main = $('#main');
   main.innerHTML = `
     <div class="page-head"><div><div class="club-title">${logo(clubOf(S.user.clubId), 56)}<div><div class="label">Club</div><h1>${esc(clubName(S.user.clubId))}</h1></div></div>
-      <p class="muted">Sponsors your club is working with. A new sponsor is reserved for ${S.reserveDays} days — log your first contact before then. Your club can hold up to ${max} at once.</p></div>
+      <p class="muted">New sponsors are held for ${S.reserveDays} days — log your first contact before then.</p></div>
       <a class="btn ${full ? 'ghost' : 'key'}" href="#/add">Add sponsor</a></div>
     ${full ? `<div class="banner warn" role="alert">${svg('lock')}<div><b>Your club holds ${all.length} of ${max} sponsors — the limit.</b>
       To add another, close one first: mark it Rejected if the sponsor declined, or Released if your club is letting it go.</div></div>` : ''}
     ${soon.map(c => `<div class="banner warn" role="alert">${svg('warn')}<div><b>${esc(c.sponsor)}: ${esc(left(c.expiresAt))}</b>
       Log the first contact before ${dateTime(c.expiresAt)} or the sponsor is released. <a href="#/claim/${esc(c.id)}">Update it</a></div></div>`).join('')}
     <div class="kpis">
-      <a class="kpi ${full ? 'alert' : ''}" href="#/?status=active"><b>${all.length}<small class="of"> / ${max}</small></b><span>Active sponsors (limit ${max})</span></a>
-      <a class="kpi" href="#/?status=reserved"><b>${n('reserved')}</b><span>Reserved — clock running</span></a>
-      <a class="kpi" href="#/?status=negotiation"><b>${n('contacted') + n('negotiation')}</b><span>Contacted or negotiating</span></a>
+      <a class="kpi ${full ? 'alert' : ''}" href="#/?status=active"><b>${all.length}<small class="of"> / ${max}</small></b><span>Active</span></a>
+      <a class="kpi" href="#/?status=reserved"><b>${n('reserved')}</b><span>Reserved</span></a>
+      <a class="kpi" href="#/?status=negotiation"><b>${n('contacted') + n('negotiation')}</b><span>In progress</span></a>
       <a class="kpi" href="#/?status=confirmed"><b>${n('confirmed')}</b><span>Confirmed</span></a>
       ${n('pending_review') ? `<a class="kpi" href="#/?status=pending_review"><b>${n('pending_review')}</b><span>Waiting for SAO review</span></a>` : ''}
     </div>
-    <div class="card flush"><div class="card-head"><h2>All your sponsors</h2></div><div id="claims"></div></div>`;
+    <div class="card flush" id="claims"></div>`;
   filteredClaims($('#claims'));
 }
 
@@ -458,12 +469,11 @@ async function viewAdd() {
   const held = (await GET('/api/claims?status=active')).length, max = S.settings.maxActive;
   const main = $('#main');
   main.innerHTML = `
-    <a class="crumb" href="#/">← My sponsors</a>
+    <div class="narrow"><a class="crumb" href="#/">${svg('back', 'ic')}My sponsors</a>
     <div class="page-head"><div><h1>Add sponsor</h1>
-      <p class="muted">Check the registry first. If nobody has the sponsor, it is reserved for your club for ${S.reserveDays} days. Your club holds ${held} of ${max}.</p></div></div>
+      <p class="muted">Type the name to check the registry. A free sponsor is held for your club for ${S.reserveDays} days. Your club holds ${held} of ${max}.</p></div></div>
     ${held >= max ? `<div class="banner warn" role="alert">${svg('lock')}<div><b>Your club already holds ${max} sponsors — the limit.</b>
       Close one on <a href="#/">My sponsors</a> (Rejected or Released) before adding another. You can still search the registry below.</div></div>` : ''}
-    <div class="grid cols-2">
       <form class="card stack" id="add" novalidate>
         <div id="picked" hidden></div>
         <div class="suggest-wrap">${field('Sponsor name', '<input class="input" name="name" required maxlength="100" autocomplete="off" aria-describedby="name-err" aria-controls="sugs">')}
@@ -478,12 +488,7 @@ async function viewAdd() {
         <div id="result"></div>
         <button class="btn key block" id="go" ${held >= max ? 'disabled' : ''}>Reserve sponsor</button>
       </form>
-      <aside class="card stack"><h2>How it works</h2>
-        <p class="small"><b>One club per sponsor.</b> If another club already has a sponsor you'll see "unavailable" — never which club.</p>
-        <p class="small"><b>${S.reserveDays}-day reservation.</b> Log the date of your first contact before it ends, or the sponsor is released for other clubs.</p>
-        <p class="small"><b>Look-alike names</b> (a typo, "Egypt" added, a sub-brand) are held for SAO to check before you contact them.</p>
-        <p class="small"><b>Think your club should have an unavailable sponsor?</b> Ask SAO to review it.</p>
-      </aside>
+      <p class="muted small" style="margin-top:14px">Another club's sponsor shows as "unavailable" — you never see which club. Look-alike names go to SAO for a quick check first.</p>
     </div>`;
   const form = $('#add'), sugs = $('#sugs');
   let picked = null, lastList = [];
@@ -593,7 +598,8 @@ async function viewClaim(id) {
       <div><span class="label">Reserved</span><span class="v">${date(c.reservedAt)}</span></div>
       <div><span class="label">First contact</span><span class="v">${ymd(c.firstContact)}</span></div>
       <div><span class="label">Last activity</span><span class="v">${dateTime(c.lastActivityAt)}</span></div>
-    </div>${c.notes ? `<div style="margin-top:16px"><span class="label">Notes</span><p style="white-space:pre-wrap;margin-top:4px">${esc(c.notes)}</p></div>` : ''}</div>`;
+    </div>${c.notes ? `<div style="margin-top:16px"><span class="label">Notes</span><p style="white-space:pre-wrap;margin-top:4px">${esc(c.notes)}</p></div>` : ''}
+    <div class="danger-zone"><button class="btn danger sm" id="del-claim">${svg('trash', 'ic')}Delete ${sao ? 'this claim' : 'this sponsor'}</button></div></div>`;
 
   const history = `<div class="card"><div class="card-head"><h2>History</h2></div>
       <ul class="timeline">${d.events.map(e => `<li class="${e.kind === 'note' ? 'note' : ['expired', 'rejected', 'released'].includes(e.kind) ? 'bad' : ''}">
@@ -602,22 +608,22 @@ async function viewClaim(id) {
       <form id="note" class="row" style="margin-top:8px" novalidate><input class="input" name="text" placeholder="Add a note" maxlength="1000" style="flex:1;min-width:200px" aria-label="Add a note">
         <button class="btn ghost">Add note</button></form></div>`;
 
-  const saoTools = sao ? `<div class="card stack"><h2>SAO actions</h2>
+  const saoTools = sao ? `<div class="card"><h2 style="margin-bottom:12px">SAO actions</h2><div class="actions-list">
       ${c.status === 'pending_review' ? '<a class="btn ghost" href="#/reviews">Open in Reviews</a>' : ''}
       ${c.active && c.status !== 'pending_review' ? '<button class="btn ghost" id="reassign">Reassign to another club</button>' : ''}
       ${c.status === 'reserved' ? '<button class="btn ghost" id="extend">Extend the reservation</button>' : ''}
-      ${c.active ? '<button class="btn danger" id="release">Release the claim</button>' : ''}
       <a class="btn ghost" href="#/sponsor/${esc(c.sponsorId)}">Sponsor record</a>
-      </div>
+      ${c.active ? '<button class="btn danger" id="release">Release the claim</button>' : ''}
+      </div></div>
       ${d.history && d.history.length ? `<div class="card"><h2 style="margin-bottom:10px">Other clubs' claims on this sponsor</h2><ul class="list">${d.history.map(h =>
         `<li><div class="grow"><a href="#/claim/${esc(h.id)}" class="nm">${esc(h.club)}</a><div class="muted small">${date(h.createdAt)}${h.closeReason ? ' · ' + esc(h.closeReason) : ''}</div></div>${chip(h.status)}</li>`).join('')}</ul></div>` : ''}` : '';
 
   $('#main').innerHTML = `
-    <a class="crumb" href="${sao ? '#/claims' : '#/'}">← ${sao ? 'All claims' : 'My sponsors'}</a>
+    <a class="crumb" href="${sao ? '#/claims' : '#/'}">${svg('back', 'ic')}${sao ? 'All claims' : 'My sponsors'}</a>
     <div class="page-head"><div><div class="row" style="margin-bottom:6px">${chip(c.status)}<span class="tag">${esc(c.category)}</span></div>
       <h1>${esc(c.sponsor)}</h1>${c.instagram ? `<p class="muted">${igLink(c.instagram)}</p>` : ''}</div></div>
     ${banner}
-    <div class="grid cols-2"><div>${update}${update ? '<div style="height:16px"></div>' : ''}${history}</div><div>${facts}<div style="height:16px"></div>${saoTools}</div></div>`;
+    <div class="grid cols-2"><div class="col">${update}${history}</div><div class="col">${facts}${saoTools}</div></div>`;
 
   const upd = $('#upd');
   if (upd) {
@@ -635,6 +641,10 @@ async function viewClaim(id) {
       catch (err) { $('.err', upd).textContent = err.message; }
     };
   }
+  $('#del-claim').onclick = () => confirmDelete({ title: `Delete ${c.sponsor}?`, url: `/api/claims/${c.id}/delete`,
+    text: sao ? 'The claim, its notes and its history are erased. If no other club ever had this sponsor, the sponsor record goes too.'
+      : 'It is removed from your club\'s list with its notes and history, for everyone including SAO, and the sponsor becomes free for other clubs.',
+    done: () => { location.hash = sao ? '#/claims' : '#/'; } });
   $('#note').onsubmit = async e => {
     e.preventDefault(); const t = e.target.text.value.trim(); if (!t) return;
     try { await POST(`/api/claims/${c.id}/note`, { text: t }); render(); } catch (err) { toast(err.message, true); }
@@ -664,6 +674,14 @@ function assignDialog(sponsor, currentClubId, presetClubId, after) {
     onSubmit: async v => { const r = await POST(`/api/sponsors/${sponsor.id}/assign`, v); if (after) await after(v); toast('Assigned'); location.hash = '#/claim/' + r.claimId; } });
 }
 
+// SAO: delete a club with its claims and rep accounts
+async function delClub(club, repCount) {
+  if (repCount == null) repCount = (await GET('/api/users')).filter(u => u.clubId === club.id).length;
+  confirmDelete({ title: `Delete ${club.name}?`, url: `/api/clubs/${club.id}/delete`,
+    text: `The club, all its sponsor claims${repCount ? ` and its ${plural(repCount, 'rep account')}` : ''} are erased. To hide it but keep its history, turn it off in Admin > Clubs instead.`,
+    done: async () => { await loadSession(); location.hash = '#/admin/clubs'; render(); } });
+}
+
 // ================= SAO pages =================
 async function viewDashboard() {
   const d = await GET('/api/dashboard');
@@ -672,20 +690,18 @@ async function viewDashboard() {
   const kp = (n, t, href, cls = '') => `<a class="kpi ${cls}" href="${href}"><b>${n}</b><span>${t}</span></a>`;
   const colors = { reserved: 'var(--info-fg)', contacted: 'var(--yellow)', negotiation: '#C9A800', confirmed: 'var(--ink)', pending_review: 'var(--red)' };
   $('#main').innerHTML = `
-    <div class="page-head"><div><div class="label">SAO Head</div><h1>Dashboard</h1><p class="muted">All ${d.clubs.length} clubs · ${plural(d.sponsors, 'sponsor')} in the registry</p></div>
+    <div class="page-head"><div><h1>Dashboard</h1><p class="muted">${d.clubs.length} clubs · ${plural(d.sponsors, 'sponsor')} in the registry</p></div>
       <a class="btn ${d.openReviews + d.openRequests ? 'key' : 'ghost'}" href="#/reviews">Review queue (${d.openReviews + d.openRequests})</a></div>
-    <div class="kpis">
+    <div class="kpis six">
       ${kp(d.activeClaims, 'Active claims', '#/claims?status=active')}
       ${kp(bs.reserved || 0, 'Reserved', '#/claims?status=reserved')}
-      ${kp(bs.contacted || 0, 'Contacted', '#/claims?status=contacted')}
-      ${kp(bs.negotiation || 0, 'In negotiation', '#/claims?status=negotiation')}
+      ${kp((bs.contacted || 0) + (bs.negotiation || 0), 'In progress', '#/claims?status=active')}
       ${kp(bs.confirmed || 0, 'Confirmed', '#/claims?status=confirmed')}
       ${kp(d.expiring.length, 'Ending within 3 days', '#/claims?status=expiring', d.expiring.length ? 'alert' : '')}
-      ${kp(d.openReviews, 'Possible duplicates', '#/reviews', d.openReviews ? 'alert' : '')}
-      ${kp(d.openRequests, 'Club requests', '#/reviews?tab=requests', d.openRequests ? 'alert' : '')}
+      ${kp(d.openReviews + d.openRequests, 'Waiting for review', '#/reviews', d.openReviews + d.openRequests ? 'alert' : '')}
     </div>
     <div class="grid cols-2">
-      <div>
+      <div class="col">
         <div class="card"><div class="card-head"><h2>Clubs</h2><span class="muted small">Active claims per club</span></div>
           <div class="clubs">${d.clubs.map(c => `<a class="club-tile ${c.active ? '' : 'off'}" href="#/club/${esc(c.id)}"><div class="club-tile-head">${logo(c, 40)}<b>${esc(c.name)}</b></div>
             <span class="small ${c.total >= S.settings.maxActive ? 'due soon' : 'muted'}">${c.total} of ${S.settings.maxActive} sponsors${c.total >= S.settings.maxActive ? ' · full' : ''}${c.active ? '' : ' · turned off'}</span>
@@ -694,20 +710,19 @@ async function viewDashboard() {
           ${d.recent.length ? `<ul class="list">${d.recent.map(e => `<li><div class="grow"><a href="#/claim/${esc(e.claim_id)}"><span class="nm">${esc(e.sponsor)}</span> · ${esc(e.club || '')}</a>
             <div class="small">${esc(e.text || label(e.to_status))}</div><div class="muted small">${ago(e.at)} · ${esc(e.by)}</div></div></li>`).join('')}</ul>` : empty('Nothing yet')}</div>
       </div>
-      <div>
+      <div class="col">
         <div class="card"><div class="card-head"><h2>Ending soon</h2><a class="small" href="#/claims?status=expiring">See all</a></div>
           ${d.expiring.length ? `<ul class="list">${d.expiring.map(c => `<li><div class="grow"><a href="#/claim/${esc(c.id)}" class="nm">${esc(c.sponsor)}</a>
             <div class="muted small">${esc(c.club)}</div></div><span class="due soon">${esc(left(c.expiresAt))}</span></li>`).join('')}</ul>` : empty('No reservation ends in the next 3 days')}</div>
         <div class="card"><div class="card-head"><h2>Stalled</h2><span class="muted small">No activity for ${d.stallDays}+ days</span></div>
           ${d.stalled.length ? `<ul class="list">${d.stalled.map(c => `<li><div class="grow"><a href="#/claim/${esc(c.id)}" class="nm">${esc(c.sponsor)}</a>
-            <div class="muted small">${esc(c.club)} · last activity ${date(c.lastActivityAt)}</div></div>${chip(c.status)}</li>`).join('')}</ul>` : empty('Nothing stalled')}
-          <p class="muted small" style="margin-top:10px">Contacted and In Negotiation claims don't expire on their own. Review these and release them if needed.</p></div>
+            <div class="muted small">${esc(c.club)} · last activity ${date(c.lastActivityAt)}</div></div>${chip(c.status)}</li>`).join('')}</ul>` : empty('Nothing stalled')}</div>
       </div>
     </div>`;
 }
 
 async function viewAllClaims() {
-  $('#main').innerHTML = `<div class="page-head"><div><h1>All claims</h1><p class="muted">Every club's sponsors. Filter, open a claim, or export what you see.</p></div></div>
+  $('#main').innerHTML = `<div class="page-head"><div><h1>All claims</h1><p class="muted">Every club's sponsors.</p></div></div>
     <div class="card flush" id="claims"></div>`;
   filteredClaims($('#claims'), { club: true, exportBtn: true });
 }
@@ -716,11 +731,13 @@ async function viewClub(id) {
   const club = S.clubs.find(c => c.id === id);
   if (!club) throw Object.assign(new Error('Club not found.'), { status: 404 });
   const reps = (await GET('/api/users')).filter(u => u.clubId === id);
-  $('#main').innerHTML = `<a class="crumb" href="#/">← Dashboard</a>
+  $('#main').innerHTML = `<a class="crumb" href="#/">${svg('back', 'ic')}Dashboard</a>
     <div class="page-head"><div><div class="club-title">${logo(club, 64)}<div><div class="label">Club</div><h1>${esc(club.name)}</h1></div></div>
-      <p class="muted">${reps.length ? 'Representatives: ' + reps.map(u => esc(u.name) + (u.active ? '' : ' (off)')).join(', ') : 'No representative accounts yet.'} <a href="#/admin/users">Manage</a></p></div></div>
+      <p class="muted">${reps.length ? 'Representatives: ' + reps.map(u => esc(u.name) + (u.active ? '' : ' (off)')).join(', ') : 'No representative accounts yet.'} <a href="#/admin/users">Manage</a></p></div>
+      <button class="btn danger sm" id="del-club">${svg('trash', 'ic')}Delete club</button></div>
     <div class="card flush" id="claims"></div>`;
   filteredClaims($('#claims'), { fixed: { club: id }, exportBtn: true });
+  $('#del-club').onclick = () => delClub(club, reps.length);
 }
 
 async function viewReviews() {
@@ -743,16 +760,16 @@ async function viewReviews() {
         <div class="muted small">${esc(cd.reason)} · ${cd.gone ? 'merged or removed' : cd.holder ? `held by ${esc(cd.holder.club)} (${esc(cd.holder.status)})` : 'free'}</div></div>
         ${cd.gone ? '' : `<button class="btn ghost sm" data-merge="${esc(cd.id)}" data-name="${esc(cd.name)}" data-held="${cd.holder ? 1 : 0}">Same sponsor</button>`}</li>`).join('')}</ul>
       <div class="row" style="margin-top:14px">${r.detail && r.detail.conflict ? '' : '<button class="btn key" data-approve>Different sponsor — approve</button>'}
-        <button class="btn danger" data-reject>Reject</button></div></div>`;
+        <button class="btn danger" data-reject>Reject</button><span class="spacer"></span><button class="icon-act" data-del-review aria-label="Delete" title="Delete">${svg('trash')}</button></div></div>`;
   const reqCard = r => `<div class="card" data-id="${esc(r.id)}">
       <div class="card-head"><div><div class="label">${esc(r.club)} · ${esc(r.by || '')} · ${ago(r.createdAt)}</div><h2 style="margin-top:4px">${esc(r.sponsorName)}</h2></div></div>
       <p style="white-space:pre-wrap">${esc(r.message)}</p>
       <p class="muted small" style="margin-top:8px">${r.sponsorId ? (r.holder ? `Held by <a href="#/claim/${esc(r.holder.claimId)}">${esc(r.holder.club)}</a> (${esc(r.holder.status)})` : 'In the registry, currently free') : 'Not found in the registry under this name'}</p>
       <div class="row" style="margin-top:14px">${r.sponsorId ? `<button class="btn ghost" data-assign="${esc(r.sponsorId)}" data-holder="${esc(r.holder ? S.clubs.find(c => c.name === r.holder.club)?.id || '' : '')}">Assign to ${esc(r.club)}</button>` : ''}
-        <button class="btn key" data-reply>Reply and close</button></div></div>`;
-  const closedRow = r => `<li><div class="grow"><span class="nm">${esc(r.sponsorName)}</span> <span class="tag">${r.kind === 'request' ? 'Request' : 'Duplicate'}</span>
+        <button class="btn key" data-reply>Reply and close</button><span class="spacer"></span><button class="icon-act" data-del-review aria-label="Delete" title="Delete">${svg('trash')}</button></div></div>`;
+  const closedRow = r => `<li data-id="${esc(r.id)}"><div class="grow"><span class="nm">${esc(r.sponsorName)}</span> <span class="tag">${r.kind === 'request' ? 'Request' : 'Duplicate'}</span>
       <div class="muted small">${esc(r.club)} · ${esc(r.resolution || '')} by ${esc(r.resolvedBy || '')} ${r.resolvedAt ? date(r.resolvedAt) : ''}${r.reason ? ' · ' + esc(r.reason) : ''}</div></div>
-      ${r.claimId ? `<a class="small" href="#/claim/${esc(r.claimId)}">Claim</a>` : ''}</li>`;
+      ${r.claimId ? `<a class="small" href="#/claim/${esc(r.claimId)}">Claim</a>` : ''}<button class="icon-act" data-del-review aria-label="Delete" title="Delete">${svg('trash')}</button></li>`;
   $('#main').innerHTML = `<div class="page-head"><div><h1>Reviews</h1><p class="muted">Names that look like an existing sponsor, and clubs asking SAO to step in.</p></div></div>
     ${tabs}
     ${tab === 'duplicates' ? (dups.length ? dups.map(dupCard).join('') : `<div class="card">${empty('No possible duplicates waiting')}</div>`) : ''}
@@ -762,6 +779,9 @@ async function viewReviews() {
   const resolve = (r, action, extra = {}) => POST(`/api/reviews/${r.id}/resolve`, { action, ...extra });
   $$('[data-id]').forEach(card => {
     const r = byId[card.dataset.id];
+    const del = $('[data-del-review]', card);
+    if (del) del.onclick = () => confirmDelete({ title: `Delete this ${r.kind === 'request' ? 'request' : 'review'}?`, url: `/api/reviews/${r.id}/delete`,
+      text: r.kind === 'duplicate' && r.state === 'open' ? `The review and the claim it is holding for ${esc(r.club)} are erased.` : 'It is removed from the list.', done: refresh });
     $$('[data-merge]', card).forEach(b => b.onclick = () => dialog({ title: `Same sponsor as ${b.dataset.name}?`, submit: 'Confirm',
       intro: b.dataset.held === '1' ? `${esc(b.dataset.name)} is held by another club, so ${esc(r.club)} is told the sponsor is unavailable. "${esc(r.sponsorName)}" is saved as another name for it.`
         : `"${esc(r.sponsorName)}" is saved as another name for ${esc(b.dataset.name)}, and ${esc(r.club)} gets the ${S.reserveDays}-day reservation.`,
@@ -809,11 +829,11 @@ async function viewSponsor(id) {
   const s = await GET('/api/sponsors/' + encodeURIComponent(id));
   if (s.state === 'merged') { location.hash = '#/sponsor/' + s.mergedInto; return ''; }
   const active = s.claims.find(c => c.active);
-  $('#main').innerHTML = `<a class="crumb" href="#/sponsors">← Sponsor registry</a>
+  $('#main').innerHTML = `<a class="crumb" href="#/sponsors">${svg('back', 'ic')}Sponsor registry</a>
     <div class="page-head"><div><div class="row" style="margin-bottom:6px"><span class="tag">${esc(s.category)}</span></div><h1>${esc(s.name)}</h1>
       <p class="muted">${active ? `Held by <a href="#/claim/${esc(active.id)}">${esc(active.club)}</a> · ${esc(label(active.status))}` : 'Free — any club can reserve it'} · added ${date(s.createdAt)}</p></div></div>
     <div class="grid cols-2">
-      <div>
+      <div class="col">
         <form class="card stack" id="edit" novalidate><h2>Sponsor record</h2>
           <div class="form-grid">
             ${field('Name', `<input class="input" name="name" value="${esc(s.name)}" required maxlength="100">`)}
@@ -824,9 +844,10 @@ async function viewSponsor(id) {
           <p class="err" role="alert"></p><div class="row"><button class="btn key">Save changes</button></div></form>
         <div class="card"><div class="card-head"><h2>Claims history</h2></div>${s.claims.length ? claimsTable(s.claims, { club: true }) : empty('No claims yet')}</div>
       </div>
-      <div><div class="card stack"><h2>SAO actions</h2>
+      <div><div class="card"><h2 style="margin-bottom:12px">SAO actions</h2><div class="actions-list">
         <button class="btn ghost" id="assign">${active ? 'Reassign to another club' : 'Assign to a club'}</button>
-        <button class="btn ghost" id="merge">Merge into another sponsor</button></div></div>
+        <button class="btn ghost" id="merge">Merge into another sponsor</button>
+        <button class="btn danger" id="del-sponsor">${svg('trash', 'ic')}Delete sponsor</button></div></div></div>
     </div>`;
   const form = $('#edit');
   form.onsubmit = async e => {
@@ -836,6 +857,8 @@ async function viewSponsor(id) {
     try { await POST('/api/sponsors/' + s.id, v); toast('Saved'); render(); } catch (err) { $('.err', form).textContent = err.message; }
   };
   $('#assign').onclick = () => assignDialog(s, active && active.clubId);
+  $('#del-sponsor').onclick = () => confirmDelete({ title: `Delete ${s.name}?`, url: `/api/sponsors/${s.id}/delete`,
+    text: `The sponsor, its other names and all ${plural(s.claims.length, 'claim')} on it are erased.`, done: () => { location.hash = '#/sponsors'; } });
   $('#merge').onclick = async () => {
     const all = (await GET('/api/sponsors')).filter(x => x.id !== s.id);
     dialog({ title: `Merge ${s.name} into…`, danger: true, submit: 'Merge',
@@ -855,8 +878,8 @@ async function viewAdmin(tab) {
     main.innerHTML = head + `<div class="card flush"><div class="card-head" style="padding-bottom:14px"><h2>${plural(users.length, 'account')}</h2><button class="btn key" id="add">Add account</button></div>
       <div class="table-wrap"><table class="stackable"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Club</th><th>Status</th><th></th></tr></thead><tbody>
       ${users.map(u => `<tr><td class="first"><b>${esc(u.name)}</b></td><td data-l="Email">${esc(u.email)}</td><td data-l="Role">${u.role === 'sao' ? 'SAO Head' : 'Club rep'}</td>
-        <td data-l="Club">${esc(u.club || '—')}</td><td>${u.active ? (u.mustChange ? '<span class="tag">Starting password</span>' : '<span class="tag">Active</span>') : '<span class="chip released">' + svg('released') + 'Off</span>'}</td>
-        <td><button class="btn ghost sm" data-edit="${esc(u.id)}">Edit</button></td></tr>`).join('')}</tbody></table></div></div>`;
+        <td data-l="Club">${esc(u.club || '—')}</td><td class="st">${u.active ? (u.mustChange ? '<span class="tag">Starting password</span>' : '<span class="tag">Active</span>') : '<span class="chip released">' + svg('released') + 'Off</span>'}</td>
+        <td class="act"><div class="row" style="flex-wrap:nowrap;gap:4px"><button class="btn ghost sm" data-edit="${esc(u.id)}">Edit</button>${u.id === S.user.id ? '' : `<button class="icon-act" data-del-user="${esc(u.id)}" aria-label="Delete ${esc(u.name)}" title="Delete">${svg('trash')}</button>`}</div></td></tr>`).join('')}</tbody></table></div></div>`;
     const form = (u = {}) => field('Name', `<input class="input" name="name" value="${esc(u.name || '')}" required maxlength="100">`) +
       field('Email', `<input class="input" type="email" name="email" value="${esc(u.email || '')}" required>`) +
       field('Role', `<select class="input" name="role"><option value="rep" ${u.role !== 'sao' ? 'selected' : ''}>Club representative</option><option value="sao" ${u.role === 'sao' ? 'selected' : ''}>SAO Head</option></select>`) +
@@ -872,13 +895,15 @@ async function viewAdmin(tab) {
     };
     $('#add').onclick = () => wire(dialog({ title: 'Add account', key: true, submit: 'Add account', body: form(),
       onSubmit: async v => { await POST('/api/users', v); toast('Account added'); render(); } }));
+    $$('[data-del-user]').forEach(b => b.onclick = () => { const u = users.find(x => x.id === b.dataset.delUser);
+      confirmDelete({ title: `Delete ${u.name}'s account?`, url: `/api/users/${u.id}/delete`, text: `${esc(u.email)} can no longer sign in. Their club's sponsors stay.` }); });
     $$('[data-edit]').forEach(b => b.onclick = () => { const u = users.find(x => x.id === b.dataset.edit);
       wire(dialog({ title: 'Edit ' + u.name, body: form(u), onSubmit: async v => { v.active = !!v.active; if (!v.password) delete v.password; await POST('/api/users/' + u.id, v); toast('Saved'); render(); } })); });
   } else if (tab === 'clubs' || tab === 'categories') {
     const list = tab === 'clubs' ? S.clubs : S.categories, one = tab === 'clubs' ? 'club' : 'category';
     main.innerHTML = head + `<div class="card"><div class="card-head"><h2>${plural(list.filter(x => x.active).length, one, tab)} in use</h2><button class="btn key" id="add">Add ${one}</button></div>
       <ul class="list">${list.map(x => `<li>${tab === 'clubs' ? logo(x, 40) : ''}<div class="grow"><span class="nm">${esc(x.name)}</span>${x.active ? '' : ' <span class="tag">Turned off</span>'}</div>
-        ${tab === 'clubs' ? `<button class="btn ghost sm" data-logo="${esc(x.id)}">Logo</button>` : ''}<button class="btn ghost sm" data-edit="${esc(x.id)}">Edit</button></li>`).join('')}</ul>
+        ${tab === 'clubs' ? `<button class="btn ghost sm" data-logo="${esc(x.id)}">Logo</button>` : ''}<button class="btn ghost sm" data-edit="${esc(x.id)}">Edit</button><button class="icon-act" data-del-item="${esc(x.id)}" aria-label="Delete ${esc(x.name)}" title="Delete">${svg('trash')}</button></li>`).join('')}</ul>
       <p class="muted small" style="margin-top:12px">Turning a ${one} off hides it from new ${tab === 'clubs' ? 'accounts and assignments' : 'sponsors'}; its history stays.</p></div>`;
     $$('[data-logo]').forEach(b => b.onclick = () => { const x = list.find(y => y.id === b.dataset.logo);
       dialog({ title: 'Logo for ' + x.name, key: true, submit: 'Save logo', intro: 'A PNG, JPG or WebP picture. It is shrunk to 256 pixels; square pictures look best.',
@@ -889,27 +914,27 @@ async function viewAdmin(tab) {
           else { const f = $('[name=file]', d).files[0]; if (!f) throw new Error('Choose a picture.'); await POST(`/api/clubs/${x.id}/logo`, { data: await shrink(f) }); }
           toast('Logo saved'); refresh();
         } }); });
+    $$('[data-del-item]').forEach(b => b.onclick = () => { const x = list.find(y => y.id === b.dataset.delItem);
+      if (tab === 'clubs') return delClub(x);
+      confirmDelete({ title: `Delete the category ${x.name}?`, url: `/api/categories/${x.id}/delete`, text: 'Sponsors in it move to "Other".', done: refresh }); });
     $('#add').onclick = () => dialog({ title: 'Add ' + one, key: true, submit: 'Add', body: field('Name', '<input class="input" name="name" required maxlength="100">'),
       onSubmit: async v => { await POST(`/api/${tab}`, v); toast('Added'); refresh(); } });
     $$('[data-edit]').forEach(b => b.onclick = () => { const x = list.find(y => y.id === b.dataset.edit);
       dialog({ title: 'Edit ' + one, body: field('Name', `<input class="input" name="name" value="${esc(x.name)}" required maxlength="100">`) + `<label class="check"><input type="checkbox" name="active" ${x.active ? 'checked' : ''}> In use</label>`,
         onSubmit: async v => { await POST(`/api/${tab}/${x.id}`, { name: v.name, active: !!v.active }); toast('Saved'); refresh(); } }); });
   } else if (tab === 'settings') {
-    main.innerHTML = head + `<div class="grid cols-even"><div class="card stack"><h2>Fixed rules</h2>
-        <p><b>Reservation period:</b> ${S.reserveDays} calendar days, ending at the same Cairo time it started.</p>
-        <p><b>Exclusivity:</b> only one club may hold an active claim on a sponsor.</p>
-        <p><b>Privacy:</b> other clubs only see "unavailable", never the owning club.</p>
-        <p><b>Reminders:</b> 3 days and 1 day before a reservation ends.</p></div>
+    main.innerHTML = head + `<div class="narrow">
       <form class="card stack" id="set" novalidate><h2>Limits</h2>
         ${field('Sponsors one club may hold at once', `<div class="row"><input class="input" type="number" name="maxActive" min="1" max="200" value="${S.settings.maxActive}" style="width:110px"> <span>sponsors</span></div>`,
           'Counts Reserved, Contacted, In Negotiation, Confirmed and Pending SAO Review. A full club must close one before adding another. SAO can still assign a sponsor to a full club.')}
         ${field('Flag Contacted and In Negotiation claims after', `<div class="row"><input class="input" type="number" name="stallDays" min="7" max="180" value="${S.settings.stallDays}" style="width:110px"> <span>days without activity</span></div>`,
           'They are only flagged for SAO on the dashboard — never released automatically. (Policy still to be approved.)')}
-        <p class="err" role="alert"></p><div><button class="btn key">Save</button></div></form></div>`;
+        <p class="err" role="alert"></p><div><button class="btn key">Save</button></div></form>
+      <p class="muted small" style="margin-top:14px">Fixed rules: reservations last ${S.reserveDays} days (Cairo time), one club per sponsor, other clubs only see "unavailable", reminders 3 days and 1 day before the end.</p></div>`;
     $('#set').onsubmit = async e => { e.preventDefault(); try { await POST('/api/settings', Object.fromEntries(new FormData(e.target))); toast('Saved'); refresh(); } catch (err) { $('.err', e.target).textContent = err.message; } };
   } else {
     let offset = 0;
-    main.innerHTML = head + `<div class="card flush"><div class="table-wrap"><table class="stackable"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Change</th><th>Reason</th></tr></thead><tbody id="log"></tbody></table></div>
+    main.innerHTML = head + `<div class="card flush"><div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>Change</th><th>Reason</th></tr></thead><tbody id="log"></tbody></table></div>
       <div style="padding:14px 20px"><button class="btn ghost" id="more">Load more</button></div></div>`;
     const short = o => o ? esc(Object.entries(o).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : typeof v === 'object' && v ? JSON.stringify(v) : v}`).join(' · ')) : '';
     const more = async () => {

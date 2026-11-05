@@ -492,6 +492,39 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
       resolvedAt: num(r.resolved_at), reply: r.reason || null }));
   });
 
+  // ---------- deleting for good ----------
+  // A claim goes with its history, notes, review items, reminders and log entries.
+  async function wipeClaimRows(id) {
+    await q('DELETE FROM sp_events WHERE claim_id = $1', [id]);
+    await q('DELETE FROM sp_reviews WHERE claim_id = $1', [id]);
+    await q('DELETE FROM sp_audit WHERE record = $1', [`claim:${id}`]);
+    await q('DELETE FROM sp_notices WHERE link = $1', [`#/claim/${id}`]);
+    await q('DELETE FROM sp_claims WHERE id = $1', [id]);
+  }
+  // A sponsor goes with every claim on it, its other names and records merged into it.
+  async function wipeSponsor(id) {
+    for (const c of await q('SELECT id FROM sp_claims WHERE sponsor_id = $1', [id])) await wipeClaimRows(c.id);
+    for (const m of await q('SELECT id FROM sp_sponsors WHERE merged_into = $1', [id])) await wipeSponsor(m.id);
+    await q('DELETE FROM sp_reviews WHERE sponsor_id = $1', [id]);
+    await q('DELETE FROM sp_aliases WHERE sponsor_id = $1', [id]);
+    await q('DELETE FROM sp_audit WHERE record = $1', [`sponsor:${id}`]);
+    await q('DELETE FROM sp_sponsors WHERE id = $1', [id]);
+  }
+  // Deleting a claim also removes the sponsor record when no other club ever claimed it.
+  async function wipeClaim(c) {
+    await wipeClaimRows(c.id);
+    const others = Number((await one('SELECT COUNT(*) AS n FROM sp_claims WHERE sponsor_id = $1', [c.sponsor_id]))?.n || 0);
+    if (!others) await wipeSponsor(c.sponsor_id);
+  }
+
+  // A rep deletes one of their own club's sponsors; SAO can delete any claim.
+  on('POST', '/api/claims/:id/delete', 'any', async ({ user, args }) => {
+    const c = await claimFor(user, args.id);
+    await wipeClaim(c);
+    await audit(user, 'claim.delete', `club:${c.club_id}`, null, { club: c.club_name });
+    return { ok: true };
+  });
+
   // ================= SAO Heads only =================
   on('GET', '/api/dashboard', 'sao', async ({ user }) => {
     const { stallDays } = await settings();
@@ -819,6 +852,61 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     await db.meta('stall_days', stallDays);
     await db.meta('max_active', maxActive);
     await audit(user, 'settings.edit', 'settings', before, { stallDays, maxActive });
+    return { ok: true };
+  });
+
+  // --- SAO deletes anything, for good ---
+  on('POST', '/api/sponsors/:id/delete', 'sao', async ({ user, args }) => {
+    const s = await one('SELECT id, name FROM sp_sponsors WHERE id = $1', [args.id]);
+    if (!s) fail(404, 'Sponsor not found.');
+    await wipeSponsor(s.id);
+    await audit(user, 'sponsor.delete', 'sponsors', null, { name: s.name });
+    return { ok: true };
+  });
+  on('POST', '/api/users/:id/delete', 'sao', async ({ user, args }) => {
+    const u = await one('SELECT id, name, email FROM sp_users WHERE id = $1', [args.id]);
+    if (!u) fail(404, 'Account not found.');
+    if (u.id === user.id) fail(400, 'You cannot delete your own account.');
+    await q('DELETE FROM sp_sessions WHERE user_id = $1', [u.id]);
+    await q('DELETE FROM sp_notices WHERE user_id = $1', [u.id]);
+    await q('DELETE FROM sp_users WHERE id = $1', [u.id]);
+    await audit(user, 'user.delete', 'users', null, { name: u.name, email: u.email });
+    return { ok: true };
+  });
+  // A club goes with its sponsors' claims, its requests and its rep accounts.
+  on('POST', '/api/clubs/:id/delete', 'sao', async ({ user, args }) => {
+    const c = await one('SELECT id, name FROM sp_clubs WHERE id = $1', [args.id]);
+    if (!c) fail(404, 'Club not found.');
+    for (const cl of await q('SELECT * FROM sp_claims WHERE club_id = $1', [c.id])) await wipeClaim(cl);
+    await q('DELETE FROM sp_reviews WHERE club_id = $1', [c.id]);
+    for (const u of await q('SELECT id FROM sp_users WHERE club_id = $1', [c.id])) {
+      await q('DELETE FROM sp_sessions WHERE user_id = $1', [u.id]);
+      await q('DELETE FROM sp_notices WHERE user_id = $1', [u.id]);
+    }
+    const reps = Number((await one('SELECT COUNT(*) AS n FROM sp_users WHERE club_id = $1', [c.id]))?.n || 0);
+    await q('DELETE FROM sp_users WHERE club_id = $1', [c.id]);
+    await q('DELETE FROM sp_clubs WHERE id = $1', [c.id]);
+    await audit(user, 'club.delete', 'clubs', null, { name: c.name, accounts: reps });
+    return { ok: true };
+  });
+  // Sponsors in a deleted category move to "Other".
+  on('POST', '/api/categories/:id/delete', 'sao', async ({ user, args }) => {
+    const k = await one('SELECT id, name FROM sp_categories WHERE id = $1', [args.id]);
+    if (!k) fail(404, 'Category not found.');
+    const other = await one(`SELECT id FROM sp_categories WHERE LOWER(name) = 'other' AND id <> $1`, [k.id]);
+    await q('UPDATE sp_sponsors SET category_id = $1 WHERE category_id = $2', [other ? other.id : null, k.id]);
+    await q('DELETE FROM sp_categories WHERE id = $1', [k.id]);
+    await audit(user, 'category.delete', 'categories', null, { name: k.name });
+    return { ok: true };
+  });
+  // Deleting an open duplicate review also deletes the claim it was holding.
+  on('POST', '/api/reviews/:id/delete', 'sao', async ({ user, args }) => {
+    const r = await one('SELECT * FROM sp_reviews WHERE id = $1', [args.id]);
+    if (!r) fail(404, 'Not found.');
+    const held = r.kind === 'duplicate' && r.state === 'open' && r.claim_id ? await one('SELECT * FROM sp_claims WHERE id = $1', [r.claim_id]) : null;
+    await q('DELETE FROM sp_reviews WHERE id = $1', [r.id]);
+    if (held) await wipeClaim(held);
+    await audit(user, 'review.delete', 'reviews', null, { kind: r.kind, sponsor: r.sponsor_name });
     return { ok: true };
   });
 
