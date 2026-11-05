@@ -194,6 +194,23 @@ test('a site set up before the guide clubs gets them once, without duplicates', 
   assert.equal(rows.length, 23);   // the 4 old clubs are matched ("The Insider" = "Insider GUC"), 19 added
   assert.equal(rows.find(r => r.name === 'The Insider').logo, 'assets/clubs/insider.png');
   assert.equal(rows.filter(r => r.name === 'Enactus GUC').length, 1);
+  assert.ok(rows.every(r => r.logo), 'every club has a logo');
+});
+
+test('the logo update fills missing logos only, and keeps an uploaded one', async () => {
+  const { createDb } = await import('../supabase/functions/_shared/core/db.mjs');
+  const { syncClubs } = await import('../supabase/functions/_shared/core/setup.mjs');
+  const driver = sqliteDriver(':memory:');
+  await createApp({ driver }).ready();
+  const db = createDb(driver);
+  await db.q("INSERT INTO sp_clubs (id, name, active, sort) VALUES ('a', 'Cura', 1, 0)");
+  await db.q("INSERT INTO sp_clubs (id, name, active, sort, logo_data) VALUES ('b', 'Qubit GUC', 1, 1, 'data:image/png;base64,AA==')");
+  await db.meta('clubs_guide_2026', '1');   // a site that already had the first update
+  await db.tx(() => syncClubs(db));
+  const rows = await db.q('SELECT id, logo FROM sp_clubs ORDER BY id');
+  assert.equal(rows.length, 2);   // no clubs added
+  assert.equal(rows[0].logo, 'assets/clubs/cura.png');
+  assert.equal(rows[1].logo, null);   // the uploaded logo still wins
 });
 
 test('matching rules', async () => {

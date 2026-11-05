@@ -6,10 +6,11 @@ import { addLocalDays, localDate } from './time.mjs';
 // Clubs, with the logos from the Student Activities Guide cover (assets/clubs/). `also` = other names an existing club may have.
 export const CLUBS = [
   { name: 'SPSA GUC', logo: 'spsa' }, { name: 'AYB GUC', logo: 'ayb', also: ['3ashanak Ya Balady', 'علشانك يا بلدي'] },
-  { name: 'GUC MUN', logo: 'mun' }, { name: 'Revive GUC' }, { name: 'TCS GUC', logo: 'tcs', also: ['GUC TCS', 'Theatre & Cinema School'] },
+  { name: 'GUC MUN', logo: 'mun' }, { name: 'Revive GUC', logo: 'revive', also: ['Revive'] }, { name: 'TCS GUC', logo: 'tcs', also: ['GUC TCS', 'Theatre & Cinema School'] },
   { name: 'Athar GUC', logo: 'athar' }, { name: 'Insider GUC', logo: 'insider', also: ['The Insider'] }, { name: 'IEEE GUC', logo: 'ieee' },
-  { name: 'Innovators GUC' }, { name: 'GDG GUC', logo: 'gdg' }, { name: 'Elwarsha GUC', logo: 'elwarsha' },
-  { name: 'VGS GUC', logo: 'vgs', also: ['Vector Game Studio'] }, { name: 'The Moot Court Club' }, { name: 'Cura' }, { name: 'Qubit GUC' },
+  { name: 'Innovators GUC', logo: 'innovators' }, { name: 'GDG GUC', logo: 'gdg' }, { name: 'Elwarsha GUC', logo: 'elwarsha' },
+  { name: 'VGS GUC', logo: 'vgs', also: ['Vector Game Studio'] }, { name: 'The Moot Court Club', logo: 'mootcourt', also: ['Moot Court Club', 'MCC'] },
+  { name: 'Cura', logo: 'cura', also: ['Cura GUC'] }, { name: 'Qubit GUC', logo: 'qubit', also: ['Qubit'] },
   { name: 'TEDxGUC', logo: 'tedx' }, { name: 'Inspire GUC', logo: 'inspire' },
   { name: 'Incubator GUC', logo: 'incubator', also: ['Incubator'] }, { name: 'T.I.Q GUC', logo: 'tiq', also: ['T.I.Q', 'The Intelligent Question'] },
   { name: 'ASME GUC', logo: 'asme' }, { name: 'Enactus GUC', logo: 'enactus', also: ['Enactus'] },
@@ -17,6 +18,7 @@ export const CLUBS = [
 ];
 const logoPath = c => c.logo ? `assets/clubs/${c.logo}.png` : null;
 const CLUBS_VERSION = 'clubs_guide_2026';
+const LOGOS_VERSION = 'club_logos_2';   // second pass: logos for the 5 clubs not on the guide cover (from the SAO Portal)
 export const DEFAULT_CATEGORIES = ['Food and Beverage', 'Technology', 'Telecommunications', 'Banking and Finance', 'Fashion and Lifestyle', 'Education',
   'Entertainment', 'Health and Wellness', 'Retail and E-commerce', 'Automotive', 'Travel and Hospitality', 'Other'];
 export const DEMO_PASSWORD = 'Demo1234';
@@ -25,17 +27,32 @@ export async function seedBasics(db) {
   let i = 0;
   for (const c of CLUBS) await db.q('INSERT INTO sp_clubs (id, name, active, sort, logo) VALUES ($1, $2, 1, $3, $4)', [newId(), c.name, i++, logoPath(c)]);
   await db.meta(CLUBS_VERSION, '1');
+  await db.meta(LOGOS_VERSION, '1');
   i = 0;
   for (const name of DEFAULT_CATEGORIES) await db.q('INSERT INTO sp_categories (id, name, active, sort) VALUES ($1, $2, 1, $3)', [newId(), name, i++]);
 }
 
 // Once, on a site set up before the guide's clubs were added: give existing clubs their logo and add the missing clubs.
 // Clubs SAO renamed or added stay as they are.
+// Then, once more: logos only, for clubs that still have none (never adds clubs, never replaces an uploaded logo).
+const key = s => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 export async function syncClubs(db) {
+  await addGuideClubs(db);
+  if ((await db.meta(LOGOS_VERSION)) === '1') return;
+  const have = await db.q('SELECT id, name, logo, logo_data FROM sp_clubs');
+  if (!have.length) return;
+  for (const c of CLUBS) {
+    if (!c.logo) continue;
+    const names = [c.name, ...(c.also || [])].map(key);
+    const found = have.find(h => names.includes(key(h.name)));
+    if (found && !found.logo && !found.logo_data) await db.q('UPDATE sp_clubs SET logo = $1 WHERE id = $2', [logoPath(c), found.id]);
+  }
+  await db.meta(LOGOS_VERSION, '1');
+}
+async function addGuideClubs(db) {
   if ((await db.meta(CLUBS_VERSION)) === '1') return;
   const have = await db.q('SELECT id, name, logo FROM sp_clubs');
   if (!have.length) return;   // not set up yet: setup adds everything
-  const key = s => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   let sort = Math.max(0, ...(await db.q('SELECT sort FROM sp_clubs')).map(r => Number(r.sort))) + 1;
   for (const c of CLUBS) {
     const names = [c.name, ...(c.also || [])].map(key);
