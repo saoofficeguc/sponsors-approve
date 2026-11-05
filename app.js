@@ -432,15 +432,18 @@ async function viewMyClub() {
   const all = await GET('/api/claims?status=active');
   const n = st => all.filter(c => c.status === st).length;
   const soon = all.filter(c => c.status === 'reserved' && c.expiresAt - Date.now() < 3 * DAY);
+  const max = S.settings.maxActive, full = all.length >= max;
   const main = $('#main');
   main.innerHTML = `
     <div class="page-head"><div><div class="club-title">${logo(clubOf(S.user.clubId), 56)}<div><div class="label">Club</div><h1>${esc(clubName(S.user.clubId))}</h1></div></div>
-      <p class="muted">Sponsors your club is working with. A new sponsor is reserved for ${S.reserveDays} days — log your first contact before then.</p></div>
-      <a class="btn key" href="#/add">Add sponsor</a></div>
+      <p class="muted">Sponsors your club is working with. A new sponsor is reserved for ${S.reserveDays} days — log your first contact before then. Your club can hold up to ${max} at once.</p></div>
+      <a class="btn ${full ? 'ghost' : 'key'}" href="#/add">Add sponsor</a></div>
+    ${full ? `<div class="banner warn" role="alert">${svg('lock')}<div><b>Your club holds ${all.length} of ${max} sponsors — the limit.</b>
+      To add another, close one first: mark it Rejected if the sponsor declined, or Released if your club is letting it go.</div></div>` : ''}
     ${soon.map(c => `<div class="banner warn" role="alert">${svg('warn')}<div><b>${esc(c.sponsor)}: ${esc(left(c.expiresAt))}</b>
       Log the first contact before ${dateTime(c.expiresAt)} or the sponsor is released. <a href="#/claim/${esc(c.id)}">Update it</a></div></div>`).join('')}
     <div class="kpis">
-      <a class="kpi" href="#/?status=active"><b>${all.length}</b><span>Active</span></a>
+      <a class="kpi ${full ? 'alert' : ''}" href="#/?status=active"><b>${all.length}<small class="of"> / ${max}</small></b><span>Active sponsors (limit ${max})</span></a>
       <a class="kpi" href="#/?status=reserved"><b>${n('reserved')}</b><span>Reserved — clock running</span></a>
       <a class="kpi" href="#/?status=negotiation"><b>${n('contacted') + n('negotiation')}</b><span>Contacted or negotiating</span></a>
       <a class="kpi" href="#/?status=confirmed"><b>${n('confirmed')}</b><span>Confirmed</span></a>
@@ -452,11 +455,14 @@ async function viewMyClub() {
 
 async function viewAdd() {
   if (S.user.role !== 'rep') { location.hash = '#/sponsors'; return ''; }
+  const held = (await GET('/api/claims?status=active')).length, max = S.settings.maxActive;
   const main = $('#main');
   main.innerHTML = `
     <a class="crumb" href="#/">← My sponsors</a>
     <div class="page-head"><div><h1>Add sponsor</h1>
-      <p class="muted">Check the registry first. If nobody has the sponsor, it is reserved for your club for ${S.reserveDays} days.</p></div></div>
+      <p class="muted">Check the registry first. If nobody has the sponsor, it is reserved for your club for ${S.reserveDays} days. Your club holds ${held} of ${max}.</p></div></div>
+    ${held >= max ? `<div class="banner warn" role="alert">${svg('lock')}<div><b>Your club already holds ${max} sponsors — the limit.</b>
+      Close one on <a href="#/">My sponsors</a> (Rejected or Released) before adding another. You can still search the registry below.</div></div>` : ''}
     <div class="grid cols-2">
       <form class="card stack" id="add" novalidate>
         <div id="picked" hidden></div>
@@ -470,7 +476,7 @@ async function viewAdd() {
         </div>
         ${field('Notes <em>(optional)</em>', '<textarea class="input" name="notes" maxlength="1000" placeholder="Contact person, plans, anything useful for your club"></textarea>', 'Only your club and SAO see notes.')}
         <div id="result"></div>
-        <button class="btn key block" id="go">Reserve sponsor</button>
+        <button class="btn key block" id="go" ${held >= max ? 'disabled' : ''}>Reserve sponsor</button>
       </form>
       <aside class="card stack"><h2>How it works</h2>
         <p class="small"><b>One club per sponsor.</b> If another club already has a sponsor you'll see "unavailable" — never which club.</p>
@@ -525,6 +531,8 @@ async function viewAdd() {
           Another club is already working with this sponsor. If you think your club should have it, ask SAO to review.
           <div style="margin-top:10px"><button type="button" class="btn sm" id="ask">Ask SAO to review</button></div></div></div>`;
         $('#ask').onclick = () => askSao(picked ? picked.name : v.name, d.sponsorId);
+      } else if (d.code === 'limit') {
+        $('#result').innerHTML = `<div class="banner warn" role="alert">${svg('lock')}<div><b>Your club is at its sponsor limit.</b>${esc(err.message)}</div></div>`;
       } else if (d.code === 'own') {
         $('#result').innerHTML = `<div class="banner ok">${svg('info')}<div><b>Your club already has this sponsor.</b> <a href="#/claim/${esc(d.claimId)}">Open it</a></div></div>`;
       } else if (d.field === 'instagram') { $('#ig-err').textContent = err.message; form.instagram.focus(); }
@@ -680,7 +688,7 @@ async function viewDashboard() {
       <div>
         <div class="card"><div class="card-head"><h2>Clubs</h2><span class="muted small">Active claims per club</span></div>
           <div class="clubs">${d.clubs.map(c => `<a class="club-tile ${c.active ? '' : 'off'}" href="#/club/${esc(c.id)}"><div class="club-tile-head">${logo(c, 40)}<b>${esc(c.name)}</b></div>
-            <span class="muted small">${plural(c.total, 'active claim')}${c.active ? '' : ' · turned off'}</span>
+            <span class="small ${c.total >= S.settings.maxActive ? 'due soon' : 'muted'}">${c.total} of ${S.settings.maxActive} sponsors${c.total >= S.settings.maxActive ? ' · full' : ''}${c.active ? '' : ' · turned off'}</span>
             <div class="bar" aria-hidden="true">${Object.entries(c.byStatus).map(([s, n]) => `<i style="width:${(n / Math.max(1, c.total)) * 100}%;background:${colors[s] || 'var(--grey)'}"></i>`).join('')}</div></a>`).join('')}</div></div>
         <div class="card"><div class="card-head"><h2>Recent activity</h2></div>
           ${d.recent.length ? `<ul class="list">${d.recent.map(e => `<li><div class="grow"><a href="#/claim/${esc(e.claim_id)}"><span class="nm">${esc(e.sponsor)}</span> · ${esc(e.club || '')}</a>
@@ -892,7 +900,9 @@ async function viewAdmin(tab) {
         <p><b>Exclusivity:</b> only one club may hold an active claim on a sponsor.</p>
         <p><b>Privacy:</b> other clubs only see "unavailable", never the owning club.</p>
         <p><b>Reminders:</b> 3 days and 1 day before a reservation ends.</p></div>
-      <form class="card stack" id="set" novalidate><h2>Stalled claims</h2>
+      <form class="card stack" id="set" novalidate><h2>Limits</h2>
+        ${field('Sponsors one club may hold at once', `<div class="row"><input class="input" type="number" name="maxActive" min="1" max="200" value="${S.settings.maxActive}" style="width:110px"> <span>sponsors</span></div>`,
+          'Counts Reserved, Contacted, In Negotiation, Confirmed and Pending SAO Review. A full club must close one before adding another. SAO can still assign a sponsor to a full club.')}
         ${field('Flag Contacted and In Negotiation claims after', `<div class="row"><input class="input" type="number" name="stallDays" min="7" max="180" value="${S.settings.stallDays}" style="width:110px"> <span>days without activity</span></div>`,
           'They are only flagged for SAO on the dashboard — never released automatically. (Policy still to be approved.)')}
         <p class="err" role="alert"></p><div><button class="btn key">Save</button></div></form></div>`;

@@ -323,3 +323,4 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-to
 .club-tile-head b { line-height: 1.2; }
 .club-title { display: flex; align-items: center; gap: 16px; }
 .club-title .club-logo { border-radius: 14px; }
+.kpi b small.of { font-size: 18px; font-weight: 700; color: var(--grey); letter-spacing: 0; }

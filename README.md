@@ -28,6 +28,7 @@ npm test
 | Rule | How it works |
 |---|---|
 | One club per sponsor | The database itself allows only one active claim per sponsor, and every change runs one at a time, so two clubs pressing "Reserve" at the same moment can't both win. |
+| 20 sponsors per club | A club can hold at most 20 active sponsors at once (Pending SAO Review counts). SAO can change the number in Admin > Rules, and can still assign to a full club. |
 | 14-day reservation | Ends at the same Cairo clock time 14 calendar days later. Logging the first-contact date stops the clock. Reminders 3 days and 1 day before. |
 | Automatic expiry | Checked on every request and every hour (GitHub Actions). History is never deleted. |
 | Privacy | Other clubs only see "This sponsor is currently unavailable." Nothing in any club page, search or error names the owning club. |

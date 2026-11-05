@@ -91,7 +91,9 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     const reps = await q("SELECT id FROM sp_users WHERE club_id = $1 AND role = 'rep' AND active = 1", [clubId]);
     for (const r of reps) await q('INSERT INTO sp_notices (id, user_id, at, text, link, seen) VALUES ($1, $2, $3, $4, $5, 0)', [newId(), r.id, now(), text, link || null]);
   }
-  const settings = async () => ({ stallDays: Number(await db.meta('stall_days')) || 30 });
+  const MAX_ACTIVE = 20;   // default: sponsors a club may hold at once (SAO can change it in Admin > Rules)
+  const settings = async () => ({ stallDays: Number(await db.meta('stall_days')) || 30, maxActive: Number(await db.meta('max_active')) || MAX_ACTIVE });
+  const activeCount = async clubId => Number((await one('SELECT COUNT(*) AS n FROM sp_claims WHERE club_id = $1 AND active = 1', [clubId]))?.n || 0);
 
   // ---------- the clock: end reservations with no contact after 14 days, and send reminders ----------
   async function sweep() {
@@ -346,6 +348,10 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     rateLimit(`claim:${user.id}`, 30, 60000, now());
     const club = await one('SELECT * FROM sp_clubs WHERE id = $1 AND active = 1', [user.club_id]);
     if (!club) fail(403, 'Your account is not linked to an active club. Ask SAO.');
+    // Each club may hold a limited number of sponsors at once (all active statuses count, including Pending SAO Review)
+    const { maxActive } = await settings();
+    if (await activeCount(club.id) >= maxActive)
+      fail(409, `Your club already holds ${maxActive} sponsors, the most allowed at once. Close one (Rejected or Released) before adding another, or ask SAO.`, { code: 'limit' });
     const notes = str(body.notes, 1000);
     let name, categoryId, handle = null, picked = null;
     if (body.sponsorId) {
@@ -805,11 +811,14 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
   }
 
   on('POST', '/api/settings', 'sao', async ({ user, body }) => {
-    const stallDays = Math.round(Number(body.stallDays));
-    if (!(stallDays >= 7 && stallDays <= 180)) fail(400, 'Choose between 7 and 180 days.');
     const before = await settings();
+    const stallDays = body.stallDays == null ? before.stallDays : Math.round(Number(body.stallDays));
+    if (!(stallDays >= 7 && stallDays <= 180)) fail(400, 'Choose between 7 and 180 days.');
+    const maxActive = body.maxActive == null ? before.maxActive : Math.round(Number(body.maxActive));
+    if (!(maxActive >= 1 && maxActive <= 200)) fail(400, 'The sponsor limit must be between 1 and 200.');
     await db.meta('stall_days', stallDays);
-    await audit(user, 'settings.edit', 'settings', before, { stallDays });
+    await db.meta('max_active', maxActive);
+    await audit(user, 'settings.edit', 'settings', before, { stallDays, maxActive });
     return { ok: true };
   });
 

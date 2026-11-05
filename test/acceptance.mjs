@@ -197,6 +197,26 @@ test('a site set up before the guide clubs gets them once, without duplicates', 
   assert.ok(rows.every(r => r.logo), 'every club has a logo');
 });
 
+test('a club can hold at most 20 sponsors at once (SAO can change it)', async () => {
+  const d = clubs.find(c => c.name === 'Qubit GUC');
+  const made = await call('POST', '/api/users', { name: 'Rep D', email: 'd@club.test', role: 'rep', clubId: d.id, password: 'Start1234' }, sao);
+  assert.equal(made.status, 200, JSON.stringify(made.data));
+  const D = await login('d@club.test');
+  const add = n => call('POST', '/api/claims', { name: `Limit Test ${['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel', 'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa', 'Quebec', 'Romeo', 'Sierra', 'Tango', 'Uniform', 'Victor'][n]} Zone${n}x${n * 7}`, categoryId: cats.Other }, D);
+  for (let i = 0; i < 20; i++) assert.equal((await add(i)).status, 200, 'claim ' + i);
+  const over = await add(20);
+  assert.equal(over.status, 409); assert.equal(over.data.code, 'limit');
+  // closing one frees a place
+  const one = (await call('GET', '/api/claims?status=active', null, D)).data[0];
+  assert.equal((await call('POST', `/api/claims/${one.id}/status`, { status: 'released' }, D)).status, 200);
+  assert.equal((await add(20)).status, 200);
+  // SAO lowers the limit; the club is now over it and cannot add
+  assert.equal((await call('POST', '/api/settings', { maxActive: 5 }, sao)).status, 200);
+  assert.equal((await add(21)).data.code, 'limit');
+  assert.equal((await call('GET', '/api/session', null, D)).data.settings.maxActive, 5);
+  await call('POST', '/api/settings', { maxActive: 20 }, sao);
+});
+
 test('the logo update fills missing logos only, and keeps an uploaded one', async () => {
   const { createDb } = await import('../supabase/functions/_shared/core/db.mjs');
   const { syncClubs } = await import('../supabase/functions/_shared/core/setup.mjs');
