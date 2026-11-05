@@ -3,5 +3,5 @@
 // Anywhere else (node server.js) the server is the same address as the pages.
 // To use a different Supabase project, change the project ref here and in .github/workflows/*.yml.
 window.SP_API = /\.github\.io$/.test(location.hostname)
-  ? 'https://chrgfpssxaapsghcgxql.supabase.co/functions/v1/sponsors'
+  ? 'https://lojfwwmddjarzgnxzyzi.supabase.co/functions/v1/sponsors'
   : '';

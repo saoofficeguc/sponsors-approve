@@ -53,8 +53,8 @@ Accounts: SAO adds each person with a starting password; they must choose their 
 
 ## Put it online (free: GitHub Pages + Supabase)
 
-Same setup as the SAO Portal, and it can share the portal's Supabase project (all tables here start with `sp_`).
-The project ref `chrgfpssxaapsghcgxql` is in `config.js` and `.github/workflows/*.yml` — change it in those places to use another project.
+Same setup as the SAO Portal, on its own Supabase project (all tables here start with `sp_`).
+The project ref `lojfwwmddjarzgnxzyzi` is in `config.js` and `.github/workflows/*.yml` — change it in those places to use another project.
 
 1. GitHub repository > **Settings > Pages** > Source: **GitHub Actions**.
 2. **Settings > Secrets and variables > Actions** > New secret `SUPABASE_ACCESS_TOKEN` (from supabase.com/dashboard/account/tokens).

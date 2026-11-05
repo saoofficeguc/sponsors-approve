@@ -11,7 +11,7 @@ concurrency:
   group: supabase
   cancel-in-progress: false
 env:
-  PROJECT_REF: chrgfpssxaapsghcgxql
+  PROJECT_REF: lojfwwmddjarzgnxzyzi
 jobs:
   deploy:
     runs-on: ubuntu-latest
