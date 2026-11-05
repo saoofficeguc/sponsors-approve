@@ -124,6 +124,30 @@ const reasonField = (lbl = 'Reason', hint = 'Saved in the audit log.') => field(
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const qs = () => new URLSearchParams((location.hash.split('?')[1]) || '');
 const clubName = id => (S.clubs.find(c => c.id === id) || {}).name || '';
+const clubOf = id => S.clubs.find(c => c.id === id) || {};
+// A club's logo, or its initials when it has none
+function logo(club, size = 32) {
+  const src = club.logoApi ? API + club.logoApi : club.logo;
+  const st = `width:${size}px;height:${size}px`;
+  if (src) return `<img class="club-logo" src="${esc(src)}" alt="" style="${st}" loading="lazy">`;
+  const ini = String(club.name || '?').replace(/\bGUC\b/g, '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  return `<span class="club-logo ph" aria-hidden="true" style="${st};font-size:${Math.round(size * .38)}px">${esc(ini)}</span>`;
+}
+// Shrink a picture to at most 256 px before uploading
+function shrink(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 256 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      let out = c.toDataURL('image/png'); if (out.length > 380000) out = c.toDataURL('image/webp', 0.9);
+      resolve(out);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That file is not a picture this browser can read.')); };
+    img.src = url;
+  });
+}
 const empty = (title, text = '') => `<div class="empty"><b>${esc(title)}</b>${esc(text)}</div>`;
 
 // ---------- start ----------
@@ -207,7 +231,7 @@ function renderLogin(s) {
 function renderSetup(s) {
   $('#app').innerHTML = `<div class="login"><div class="login-card">${lockup}
     <h1 style="font-size:26px">Set up the registry</h1>
-    <p class="muted" style="margin:6px 0 20px">Create the first SAO Head account. The 17 clubs and the category list are added for you; you can change them later.</p>
+    <p class="muted" style="margin:6px 0 20px">Create the first SAO Head account. The clubs (with their logos) and the category list are added for you; you can change them later.</p>
     <form id="setup" class="stack" novalidate>
       ${s.setupNeedsCode ? field('Setup code', '<input class="input" name="code" required autocomplete="off">', 'The SP_SETUP_CODE secret set on the server.') : ''}
       ${field('Your name', '<input class="input" name="name" required autocomplete="name">')}
@@ -351,7 +375,7 @@ function claimsTable(list, { club = false } = {}) {
   return `<div class="table-wrap"><table class="stackable"><thead><tr><th>Sponsor</th>${club ? '<th>Club</th>' : ''}<th>Category</th><th>Status</th><th>Deadline</th><th>Last activity</th></tr></thead><tbody>
     ${list.map(c => `<tr class="go" data-href="#/claim/${esc(c.id)}">
       <td class="first"><a class="nm" href="#/claim/${esc(c.id)}">${esc(c.sponsor)}</a>${c.instagram ? `<div class="sub">@${esc(c.instagram)}</div>` : ''}</td>
-      ${club ? `<td data-l="Club">${esc(c.club || '')}</td>` : ''}
+      ${club ? `<td data-l="Club"><span class="club-cell">${logo(clubOf(c.clubId), 24)}${esc(c.club || '')}</span></td>` : ''}
       <td data-l="Category">${esc(c.category)}</td>
       <td>${chip(c.status)}${c.stalled ? ' <span class="tag">Stalled</span>' : ''}</td>
       <td data-l="Deadline">${deadline(c)}</td>
@@ -410,7 +434,7 @@ async function viewMyClub() {
   const soon = all.filter(c => c.status === 'reserved' && c.expiresAt - Date.now() < 3 * DAY);
   const main = $('#main');
   main.innerHTML = `
-    <div class="page-head"><div><div class="label">Club</div><h1>${esc(clubName(S.user.clubId))}</h1>
+    <div class="page-head"><div><div class="club-title">${logo(clubOf(S.user.clubId), 56)}<div><div class="label">Club</div><h1>${esc(clubName(S.user.clubId))}</h1></div></div>
       <p class="muted">Sponsors your club is working with. A new sponsor is reserved for ${S.reserveDays} days — log your first contact before then.</p></div>
       <a class="btn key" href="#/add">Add sponsor</a></div>
     ${soon.map(c => `<div class="banner warn" role="alert">${svg('warn')}<div><b>${esc(c.sponsor)}: ${esc(left(c.expiresAt))}</b>
@@ -655,7 +679,7 @@ async function viewDashboard() {
     <div class="grid cols-2">
       <div>
         <div class="card"><div class="card-head"><h2>Clubs</h2><span class="muted small">Active claims per club</span></div>
-          <div class="clubs">${d.clubs.map(c => `<a class="club-tile ${c.active ? '' : 'off'}" href="#/club/${esc(c.id)}"><b>${esc(c.name)}</b>
+          <div class="clubs">${d.clubs.map(c => `<a class="club-tile ${c.active ? '' : 'off'}" href="#/club/${esc(c.id)}"><div class="club-tile-head">${logo(c, 40)}<b>${esc(c.name)}</b></div>
             <span class="muted small">${plural(c.total, 'active claim')}${c.active ? '' : ' · turned off'}</span>
             <div class="bar" aria-hidden="true">${Object.entries(c.byStatus).map(([s, n]) => `<i style="width:${(n / Math.max(1, c.total)) * 100}%;background:${colors[s] || 'var(--grey)'}"></i>`).join('')}</div></a>`).join('')}</div></div>
         <div class="card"><div class="card-head"><h2>Recent activity</h2></div>
@@ -685,7 +709,7 @@ async function viewClub(id) {
   if (!club) throw Object.assign(new Error('Club not found.'), { status: 404 });
   const reps = (await GET('/api/users')).filter(u => u.clubId === id);
   $('#main').innerHTML = `<a class="crumb" href="#/">← Dashboard</a>
-    <div class="page-head"><div><div class="label">Club</div><h1>${esc(club.name)}</h1>
+    <div class="page-head"><div><div class="club-title">${logo(club, 64)}<div><div class="label">Club</div><h1>${esc(club.name)}</h1></div></div>
       <p class="muted">${reps.length ? 'Representatives: ' + reps.map(u => esc(u.name) + (u.active ? '' : ' (off)')).join(', ') : 'No representative accounts yet.'} <a href="#/admin/users">Manage</a></p></div></div>
     <div class="card flush" id="claims"></div>`;
   filteredClaims($('#claims'), { fixed: { club: id }, exportBtn: true });
@@ -845,9 +869,18 @@ async function viewAdmin(tab) {
   } else if (tab === 'clubs' || tab === 'categories') {
     const list = tab === 'clubs' ? S.clubs : S.categories, one = tab === 'clubs' ? 'club' : 'category';
     main.innerHTML = head + `<div class="card"><div class="card-head"><h2>${plural(list.filter(x => x.active).length, one, tab)} in use</h2><button class="btn key" id="add">Add ${one}</button></div>
-      <ul class="list">${list.map(x => `<li><div class="grow"><span class="nm">${esc(x.name)}</span>${x.active ? '' : ' <span class="tag">Turned off</span>'}</div>
-        <button class="btn ghost sm" data-edit="${esc(x.id)}">Edit</button></li>`).join('')}</ul>
+      <ul class="list">${list.map(x => `<li>${tab === 'clubs' ? logo(x, 40) : ''}<div class="grow"><span class="nm">${esc(x.name)}</span>${x.active ? '' : ' <span class="tag">Turned off</span>'}</div>
+        ${tab === 'clubs' ? `<button class="btn ghost sm" data-logo="${esc(x.id)}">Logo</button>` : ''}<button class="btn ghost sm" data-edit="${esc(x.id)}">Edit</button></li>`).join('')}</ul>
       <p class="muted small" style="margin-top:12px">Turning a ${one} off hides it from new ${tab === 'clubs' ? 'accounts and assignments' : 'sponsors'}; its history stays.</p></div>`;
+    $$('[data-logo]').forEach(b => b.onclick = () => { const x = list.find(y => y.id === b.dataset.logo);
+      dialog({ title: 'Logo for ' + x.name, key: true, submit: 'Save logo', intro: 'A PNG, JPG or WebP picture. It is shrunk to 256 pixels; square pictures look best.',
+        body: `<div class="row">${logo(x, 72)}<input type="file" name="file" accept="image/png,image/jpeg,image/webp" class="input" style="flex:1;min-width:180px;padding-top:9px"></div>` +
+          (x.logoApi ? '<label class="check"><input type="checkbox" name="remove"> Remove the uploaded logo</label>' : ''),
+        onSubmit: async (v, d) => {
+          if (v.remove) await POST(`/api/clubs/${x.id}/logo`, { data: null });
+          else { const f = $('[name=file]', d).files[0]; if (!f) throw new Error('Choose a picture.'); await POST(`/api/clubs/${x.id}/logo`, { data: await shrink(f) }); }
+          toast('Logo saved'); refresh();
+        } }); });
     $('#add').onclick = () => dialog({ title: 'Add ' + one, key: true, submit: 'Add', body: field('Name', '<input class="input" name="name" required maxlength="100">'),
       onSubmit: async v => { await POST(`/api/${tab}`, v); toast('Added'); refresh(); } });
     $$('[data-edit]').forEach(b => b.onclick = () => { const x = list.find(y => y.id === b.dataset.edit);

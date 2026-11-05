@@ -46,7 +46,17 @@ CREATE TABLE IF NOT EXISTS sp_meta (key TEXT PRIMARY KEY, value TEXT);
 const PG_LOCK = TABLES.map(t => `ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`).join('\n') +
   `\nREVOKE ALL ON ${TABLES.join(', ')} FROM anon, authenticated;`;
 
-export const ensureSchema = driver => driver.transaction(() => driver.exec(SCHEMA + (driver.dialect === 'pg' ? PG_LOCK : '')));
+// Columns added after the first version: [table, column, type]
+const ADDED = [['sp_clubs', 'logo', 'TEXT'], ['sp_clubs', 'logo_data', 'TEXT'], ['sp_clubs', 'logo_v', 'INTEGER NOT NULL DEFAULT 0']];
+
+export const ensureSchema = driver => driver.transaction(async () => {
+  await driver.exec(SCHEMA + (driver.dialect === 'pg' ? PG_LOCK : ''));
+  for (const [table, col, type] of ADDED) {
+    if (driver.dialect === 'pg') await driver.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${col} ${type};`);
+    else if (!(await driver.query(`SELECT name FROM pragma_table_info('${table}') WHERE name = $1`, [col])).length)
+      await driver.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type};`);
+  }
+});
 
 export const isUniqueError = e => e && (e.code === '23505' || /UNIQUE constraint failed/i.test(e.message || ''));
 

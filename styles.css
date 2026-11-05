@@ -314,3 +314,12 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-to
   table.stackable td.first::before { content: none; }
   .page-head .btn { width: 100%; }
 }
+
+/* Club logos */
+.club-logo { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 10px; object-fit: contain; background: #fff; border: 1px solid var(--line); }
+.club-logo.ph { background: var(--soft); color: var(--grey); font-weight: 800; letter-spacing: .02em; }
+.club-cell { display: inline-flex; align-items: center; gap: 8px; }
+.club-tile-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.club-tile-head b { line-height: 1.2; }
+.club-title { display: flex; align-items: center; gap: 16px; }
+.club-title .club-logo { border-radius: 14px; }

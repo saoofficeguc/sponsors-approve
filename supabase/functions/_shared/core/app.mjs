@@ -7,7 +7,7 @@ import { createDb, ensureSchema, isUniqueError } from './db.mjs';
 import { createAuth, hashPassword, passwordProblem, newId } from './auth.mjs';
 import { normName, possibleMatch, parseInstagram } from './match.mjs';
 import { addLocalDays, localDate, localDayStart, isDate } from './time.mjs';
-import { seedBasics, seedDemo, DEMO_PASSWORD } from './setup.mjs';
+import { seedBasics, seedDemo, syncClubs, DEMO_PASSWORD } from './setup.mjs';
 
 export const RESERVE_DAYS = 14;
 const WARN_DAYS = [3, 1];   // in-site reminders this many days before a reservation ends
@@ -74,7 +74,11 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
   const { q, one } = db;
 
   let schemaP = null;
-  const ready = () => (schemaP ||= ensureSchema(driver).catch(e => { schemaP = null; throw e; }));
+  const ready = () => (schemaP ||= ensureSchema(driver).then(() => db.tx(() => syncClubs(db))).catch(e => { schemaP = null; throw e; }));
+  // A club's logo: a built-in picture (assets/clubs/...) or one SAO uploaded (served by /api/clubs/:id/logo)
+  const CLUB_COLS = 'id, name, active, logo, logo_v, CASE WHEN logo_data IS NULL THEN 0 ELSE 1 END AS uploaded';
+  const clubOut = c => ({ id: c.id, name: c.name, active: !!Number(c.active), logo: Number(c.uploaded) ? null : c.logo || null,
+    logoApi: Number(c.uploaded) ? `/api/clubs/${c.id}/logo?v=${Number(c.logo_v) || 0}` : null });
 
   // ---------- small helpers ----------
   const audit = (actor, action, record, before, after, reason = null) => q(
@@ -252,13 +256,13 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
       const demo = (await db.meta('demo')) === '1';
       return { user: null, demo: demo ? { password: DEMO_PASSWORD, accounts: (await q(`SELECT email, name FROM sp_users WHERE email LIKE '%@demo.local' ORDER BY name LIMIT 30`)) } : null };
     }
-    const clubs = user.role === 'sao' ? await q('SELECT id, name, active FROM sp_clubs ORDER BY sort, name')
-      : await q('SELECT id, name, active FROM sp_clubs WHERE id = $1', [user.club_id]);
+    const clubs = user.role === 'sao' ? await q(`SELECT ${CLUB_COLS} FROM sp_clubs ORDER BY sort, name`)
+      : await q(`SELECT ${CLUB_COLS} FROM sp_clubs WHERE id = $1`, [user.club_id]);
     const categories = await q(`SELECT id, name, active FROM sp_categories ${user.role === 'sao' ? '' : 'WHERE active = 1'} ORDER BY sort, name`);
     const unread = Number((await one('SELECT COUNT(*) AS n FROM sp_notices WHERE user_id = $1 AND seen = 0', [user.id]))?.n || 0);
     return {
       user: { id: user.id, name: user.name, email: user.email, role: user.role, clubId: user.club_id, mustChange: !!Number(user.must_change) },
-      clubs: clubs.map(c => ({ ...c, active: !!Number(c.active) })), categories: categories.map(c => ({ ...c, active: !!Number(c.active) })),
+      clubs: clubs.map(clubOut), categories: categories.map(c => ({ ...c, active: !!Number(c.active) })),
       statuses: STATUS, reserveDays: RESERVE_DAYS, settings: await settings(), unread, today: localDate(now()),
     };
   });
@@ -487,11 +491,11 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     const { stallDays } = await settings();
     const t = now();
     const byStatus = Object.fromEntries((await q('SELECT status, COUNT(*) AS n FROM sp_claims GROUP BY status')).map(r => [r.status, Number(r.n)]));
-    const clubs = await q('SELECT id, name, active FROM sp_clubs ORDER BY sort, name');
+    const clubs = await q(`SELECT ${CLUB_COLS} FROM sp_clubs ORDER BY sort, name`);
     const perClub = await q(`SELECT club_id, status, COUNT(*) AS n FROM sp_claims WHERE active = 1 GROUP BY club_id, status`);
     const clubRows = clubs.map(c => {
       const mine = perClub.filter(r => r.club_id === c.id);
-      return { id: c.id, name: c.name, active: !!Number(c.active), total: mine.reduce((a, r) => a + Number(r.n), 0),
+      return { ...clubOut(c), total: mine.reduce((a, r) => a + Number(r.n), 0),
         byStatus: Object.fromEntries(mine.map(r => [r.status, Number(r.n)])) };
     });
     const expiring = await Promise.all((await q(CLAIM_SELECT + ` WHERE c.status = 'reserved' AND c.expires_at <= $1 ORDER BY c.expires_at LIMIT 20`, [t + 3 * DAY])).map(r => claimView(r, user)));
@@ -756,6 +760,29 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     return { ok: true };
   });
 
+  // Club logos are public (they are on the club's own pages anyway), so pictures load without sign-in
+  on('GET', '/api/clubs/:id/logo', 'none', async ({ args }) => {
+    const c = await one('SELECT logo_data FROM sp_clubs WHERE id = $1', [args.id]);
+    const m = c && /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(c.logo_data || '');
+    if (!m) fail(404, 'No logo.');
+    const bin = atob(m[2]), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Response(bytes, { status: 200, headers: { ...CORS, ...SECURITY, 'Content-Type': m[1], 'Cache-Control': 'public, max-age=31536000, immutable' } });
+  });
+  on('POST', '/api/clubs/:id/logo', 'sao', async ({ user, args, body }) => {
+    const c = await one('SELECT id, name, logo_v FROM sp_clubs WHERE id = $1', [args.id]);
+    if (!c) fail(404, 'Club not found.');
+    let data = null;
+    if (body.data != null) {
+      data = String(body.data);
+      if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(data)) fail(400, 'Use a PNG, JPG or WebP picture.');
+      if (data.length > 400000) fail(400, 'The picture is too big. Use one under 250 KB.');
+    }
+    await q('UPDATE sp_clubs SET logo_data = $1, logo_v = $2 WHERE id = $3', [data, (Number(c.logo_v) || 0) + 1, c.id]);
+    await audit(user, data ? 'club.logo' : 'club.logo.remove', `club:${c.id}`, null, { club: c.name });
+    return { ok: true };
+  });
+
   for (const [table, label, path] of [['sp_clubs', 'club', 'clubs'], ['sp_categories', 'category', 'categories']]) {
     on('POST', `/api/${path}`, 'sao', async ({ user, body }) => {
       const name = need(body.name, 'Name', 2, 100);
@@ -823,6 +850,7 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
         if (match.r.role === 'sao' && user.role !== 'sao') fail(403, DENIED);
         return match.r.fn({ user, body, params: url.searchParams, args: match.args, token, ip });
       });
+      if (out instanceof Response) return out;
       if (out instanceof Reply) return typeof out.body === 'string' ? respond(out.status, out.body, 'text/csv; charset=utf-8') : respond(out.status, out.body);
       return respond(200, out ?? { ok: true });
     } catch (e) {

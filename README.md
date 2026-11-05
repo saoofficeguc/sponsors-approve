@@ -12,7 +12,7 @@ Needs **Node.js 22.13 or newer** (it uses Node's built-in SQLite). No `npm insta
 node server.js
 ```
 
-Open http://localhost:5174. The first time, create the **SAO Head** account. Tick "Fill with demo data" to try it:
+Open http://localhost:5174. The first time, create the **SAO Head** account (the clubs and their logos are added for you). Tick "Fill with demo data" to try it:
 every club gets a demo rep (`<club>@demo.local`, password `Demo1234`, listed on the sign-in page) and a few sponsors.
 
 Data lives in `data/sponsors.db`. To start again from zero, stop the server and delete `data/`.
@@ -43,7 +43,7 @@ Statuses: Reserved → Contacted → In Negotiation → Confirmed, or Rejected (
 Available / Unavailable, category, optional Instagram with link check), update status and first-contact date, notes,
 history, and *Ask SAO to review* for an unavailable sponsor. In-site notifications.
 
-**SAO Head** — Dashboard (all 17 clubs, counts by status, ending soon, stalled, recent activity), All claims with
+**SAO Head** — Dashboard (all clubs with their logos, counts by status, ending soon, stalled, recent activity), All claims with
 filters and CSV export, Reviews (possible duplicates and club requests), Sponsor registry (rename, other names, Instagram,
 merge, assign/reassign to a club), Admin (people, clubs, categories, the stalled-claim rule, full audit log).
 Release, reassign and extend always need a reason, which is logged.
@@ -75,7 +75,7 @@ The project ref `lojfwwmddjarzgnxzyzi` is in `config.js` and `.github/workflows/
 
 ## Still to decide (section 13 of the requirements)
 
-- Final club names and category list — both editable in Admin, no code change needed.
+- Final club names and category list — both editable in Admin, no code change needed. The 23 starting clubs include the 18 from the Student Activities Guide cover with their logos (`assets/clubs/`); SAO can upload or replace any logo in Admin > Clubs.
 - The long-term rule for stalled Contacted / In Negotiation claims — for now they are only flagged after 30 days (changeable in Admin > Rules), never released automatically.
 - Whether SAO may ever let two clubs share a sponsor — this build allows only reassign or release.
 - Whether contact needs evidence — this build takes a dated status update, no upload.

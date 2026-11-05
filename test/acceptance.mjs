@@ -34,7 +34,9 @@ test('setup and accounts', async () => {
   const s = await call('POST', '/api/setup', { name: 'SAO Head', email: 'head@sao.test', password: 'Head12345' });
   assert.equal(s.status, 200); sao = s.data.token;
   const sess = (await call('GET', '/api/session', null, sao)).data;
-  assert.equal(sess.clubs.length, 17); assert.equal(sess.categories.length, 12);
+  assert.equal(sess.clubs.length, 23);
+  assert.equal(sess.clubs.find(c => c.name === 'AYB GUC').logo, 'assets/clubs/ayb.png');
+  assert.ok(sess.clubs.find(c => c.name === 'Enactus GUC')); assert.equal(sess.categories.length, 12);
   clubs = sess.clubs; cats = Object.fromEntries(sess.categories.map(c => [c.name, c.id]));
   for (const [i, e] of [[0, 'a@club.test'], [1, 'b@club.test'], [2, 'c@club.test']])
     assert.equal((await call('POST', '/api/users', { name: e, email: e, role: 'rep', clubId: clubs[i].id, password: 'Start1234' }, sao)).status, 200);
@@ -164,6 +166,34 @@ test('CSV export has a row per claim and neutralizes formulas', async () => {
   const r = await call('GET', '/api/export.csv', null, sao);
   assert.equal(r.status, 200); assert.ok(r.data.includes("'=HYPERLINK"));
   assert.equal((await call('GET', '/api/export.csv', null, A)).status, 403);
+});
+
+test('club logos: SAO uploads one, anyone can load it, clubs cannot change it', async () => {
+  const id = clubs.find(c => c.name === 'Cura').id;
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  assert.equal((await call('POST', `/api/clubs/${id}/logo`, { data: png }, A)).status, 403);
+  assert.equal((await call('POST', `/api/clubs/${id}/logo`, { data: 'data:text/html;base64,PGI+' }, sao)).status, 400);
+  assert.equal((await call('POST', `/api/clubs/${id}/logo`, { data: png }, sao)).status, 200);
+  const c = (await call('GET', '/api/session', null, sao)).data.clubs.find(x => x.id === id);
+  assert.ok(c.logoApi && !c.logo);
+  const r = await app.handle(new Request('http://x' + c.logoApi));
+  assert.equal(r.status, 200); assert.equal(r.headers.get('content-type'), 'image/png');
+});
+
+test('a site set up before the guide clubs gets them once, without duplicates', async () => {
+  const { createDb } = await import('../supabase/functions/_shared/core/db.mjs');
+  const { syncClubs } = await import('../supabase/functions/_shared/core/setup.mjs');
+  const driver = sqliteDriver(':memory:');
+  const old = createApp({ driver });
+  await old.ready();
+  const db = createDb(driver);
+  for (const [i, n] of ['SPSA GUC', 'AYB GUC', 'The Insider', 'Cura'].entries()) await db.q('INSERT INTO sp_clubs (id, name, active, sort) VALUES ($1, $2, 1, $3)', ['c' + i, n, i]);
+  await db.tx(() => syncClubs(db)); await db.tx(() => syncClubs(db));
+  await db.meta('clubs_guide_2026', '0'); await db.tx(() => syncClubs(db));
+  const rows = await db.q('SELECT name, logo FROM sp_clubs');
+  assert.equal(rows.length, 23);   // the 4 old clubs are matched ("The Insider" = "Insider GUC"), 19 added
+  assert.equal(rows.find(r => r.name === 'The Insider').logo, 'assets/clubs/insider.png');
+  assert.equal(rows.filter(r => r.name === 'Enactus GUC').length, 1);
 });
 
 test('matching rules', async () => {
