@@ -56,10 +56,10 @@ Accounts: SAO adds each person with a starting password; they must choose their 
 Same setup as the SAO Portal, on its own Supabase project (all tables here start with `sp_`).
 The project ref `lojfwwmddjarzgnxzyzi` is in `config.js` and `.github/workflows/*.yml` — change it in those places to use another project.
 
-1. GitHub repository > **Settings > Pages** > Source: **GitHub Actions**.
+1. GitHub repository > **Settings > Pages** > Source: **Deploy from a branch**, branch `main`, folder `/ (root)`.
 2. **Settings > Secrets and variables > Actions** > New secret `SUPABASE_ACCESS_TOKEN` (from supabase.com/dashboard/account/tokens).
 3. In Supabase > **Edge Functions > Secrets**, add `SP_SETUP_CODE` with a code only you know.
-4. Push to `main`. The workflows test and deploy the server, publish the pages, and run the hourly check.
+4. Push to `main`: GitHub publishes the pages. Deploy the server with Actions > Deploy server (Supabase) > Run workflow, or from a computer (see the comment at the top of `.github/workflows/deploy-supabase.yml`).
 5. Open `https://saoofficeguc.github.io/sponsors-approve/`, enter the setup code and create the SAO Head account.
 6. Remove the `SP_SETUP_CODE` secret afterwards (setup is refused once any account exists anyway).
 

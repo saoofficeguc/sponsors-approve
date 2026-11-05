@@ -1,11 +1,11 @@
-# Deploys the server (the "sponsors" Supabase Edge Function) on every push to main that changes it.
-# One-time setup: repository > Settings > Secrets and variables > Actions > Secrets:
-#   SUPABASE_ACCESS_TOKEN = a personal access token from supabase.com/dashboard/account/tokens
+# Deploys the server (the "sponsors" Supabase Edge Function). Run it by hand: Actions > Deploy server (Supabase) > Run workflow.
+# Needs repository > Settings > Secrets and variables > Actions > Secrets:
+#   SUPABASE_ACCESS_TOKEN = a token from supabase.com/dashboard/account/tokens with Edge Functions write permission
+#   (or a legacy token). Without it, deploy from a computer:
+#   npx supabase login, then npx supabase functions deploy sponsors --project-ref <ref> --no-verify-jwt --use-api --yes
+# To deploy on every push again, add under "on:":  push: { branches: [main], paths: ['supabase/**'] }
 name: Deploy server (Supabase)
 on:
-  push:
-    branches: [main]
-    paths: ['supabase/**', '.github/workflows/deploy-supabase.yml']
   workflow_dispatch:
 concurrency:
   group: supabase
