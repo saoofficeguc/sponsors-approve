@@ -1,0 +1,14 @@
+{
+  "name": "sponsors-approve",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SAO Sponsor Management: one club per sponsor, 14-day reservations, SAO oversight",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/acceptance.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

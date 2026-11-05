@@ -1,0 +1,6 @@
+# Supabase settings used when deploying the "sponsors" Edge Function (.github/workflows/deploy-supabase.yml).
+project_id = "sao-sponsors"
+
+[functions.sponsors]
+# The site does its own sign-in (Authorization: Bearer <site token>), so Supabase's JWT check is turned off.
+verify_jwt = false
