@@ -11,9 +11,9 @@ const DATA_DIR = process.env.SP_DATA_DIR || path.join(root, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png',
-  '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
+  '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json' };
 // Only these files are served to browsers - never the server code or the database
-const PUBLIC = new Set(['/index.html', '/app.js', '/styles.css', '/config.js', '/manifest.webmanifest']);
+const PUBLIC = new Set(['/index.html', '/app.js', '/rooms.js', '/styles.css', '/config.js', '/manifest.webmanifest']);
 const PUBLIC_DIRS = ['/assets/'];
 const SECURITY = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY' };
 

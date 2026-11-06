@@ -26,6 +26,13 @@ const driver = {
 };
 
 const setupCode = env('SP_SETUP_CODE');
-const app = createApp({ driver, allowSetup: !!setupCode, setupCode });
+// Work that continues after the reply (updating the security Google Sheet) must be registered with the runtime
+const background = (p: Promise<unknown>) => {
+  const safe = p.catch(e => console.error(e));
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt && typeof rt.waitUntil === 'function') rt.waitUntil(safe);
+  return safe;
+};
+const app = createApp({ driver, allowSetup: !!setupCode, setupCode, background });
 
 Deno.serve((req: Request) => app.handle(req, { ip: (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() }));

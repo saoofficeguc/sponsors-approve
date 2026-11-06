@@ -1,0 +1,97 @@
+/**
+ * SAO room bookings -> this Google Sheet (for security).
+ * The SAO booking site sends a fresh copy after every booking, cancellation or block,
+ * and this sheet also fetches one every 5 minutes. Don't edit the tabs: they are rewritten each time.
+ *
+ * Setup (once): Admin > Rooms > Security sheet on the site walks you through it.
+ *   1. Paste this whole script here (Extensions > Apps Script), replacing what is there, and save.
+ *   2. Choose "setup" in the function list at the top and press Run; allow access when Google asks.
+ *   3. Deploy > New deployment > Web app: Execute as "Me", Who has access "Anyone" > Deploy.
+ *   4. Copy the Web app URL into the site and press "Save and sync".
+ */
+const API_URL = '__API_URL__';   // filled in by the site
+const SECRET = '__SECRET__';     // the sheet key from the site (Admin > Rooms)
+
+// The site sends updates here
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    if (data.secret !== SECRET) return reply({ ok: false, error: 'Wrong sheet key. Copy the script again from the site and redeploy.' });
+    write(data);
+    return reply({ ok: true });
+  } catch (err) {
+    return reply({ ok: false, error: String(err && err.message || err) });
+  }
+}
+function reply(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+// Fetch a fresh copy from the site (every 5 minutes, and from the "SAO Rooms" menu)
+function syncNow() {
+  const r = UrlFetchApp.fetch(API_URL + '/api/rooms-sheet/data?secret=' + encodeURIComponent(SECRET), { muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) throw new Error('The booking site answered ' + r.getResponseCode() + ': ' + r.getContentText().slice(0, 200));
+  write(JSON.parse(r.getContentText()));
+}
+
+// Run once: the 5-minute refresh, then a first copy
+function setup() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('syncNow').timeBased().everyMinutes(5).create();
+  syncNow();
+  SpreadsheetApp.getActive().toast('Room bookings are connected. The tabs update by themselves.', 'SAO Rooms', 8);
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('SAO Rooms').addItem('Sync now', 'syncNow').addToUi();
+}
+
+function write(data) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const ss = SpreadsheetApp.getActive();
+    data.tabs.forEach(function (tab, i) { writeTab(ss, tab, i); });
+    // drop the empty "Sheet1" a new spreadsheet starts with
+    const first = ss.getSheetByName('Sheet1');
+    if (first && ss.getSheets().length > 1 && first.getLastRow() === 0) ss.deleteSheet(first);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function writeTab(ss, tab, index) {
+  const sh = ss.getSheetByName(tab.name) || ss.insertSheet(tab.name, index);
+  const cols = tab.header.length, rows = tab.rows.length;
+  sh.clear();
+  fitSize(sh, rows + 4, cols);
+  // title, small "updated" line, a thin yellow brand line, then the column headings
+  sh.getRange(1, 1).setValue(tab.title).setFontSize(15).setFontWeight('bold').setFontColor('#121212');
+  sh.getRange(2, 1).setValue(tab.subtitle).setFontSize(9).setFontColor('#5C5C5C');
+  sh.getRange(3, 1, 1, cols).setBackground('#FFD500');
+  sh.setRowHeight(1, 32); sh.setRowHeight(3, 4);
+  sh.getRange(4, 1, 1, cols).setNumberFormat('@').setValues([tab.header])
+    .setBackground('#121212').setFontColor('#FFFFFF').setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sh.setRowHeight(4, 30);
+  if (rows) {
+    const body = sh.getRange(5, 1, rows, cols);
+    body.setNumberFormat('@').setValues(tab.rows).setBackgrounds(tab.bg).setFontColors(tab.fc)
+      .setVerticalAlignment('middle').setWrap(true).setFontSize(10);
+    if (cols > 1) sh.getRange(5, 2, rows, cols - 1).setHorizontalAlignment(tab.name.indexOf('days') >= 0 || tab.name === 'Today' ? 'left' : 'center');
+    sh.getRange(5, 1, rows, 1).setFontWeight('bold');
+    sh.getRange(4, 1, rows + 1, cols).setBorder(true, true, true, true, true, true, '#E4E4DF', SpreadsheetApp.BorderStyle.SOLID);
+    sh.setRowHeights(5, rows, 26);
+  }
+  sh.setFrozenRows(4);
+  sh.setFrozenColumns(tab.freezeCols || 0);
+  tab.widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  sh.setTabColor(index === 0 ? '#FFD500' : index === 1 ? '#E31E24' : '#121212');
+  // warn anyone who tries to type in it (the site overwrites it anyway)
+  if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length)
+    sh.protect().setDescription('Written by the SAO booking site').setWarningOnly(true);
+}
+
+function fitSize(sh, rows, cols) {
+  if (sh.getMaxRows() < rows) sh.insertRowsAfter(sh.getMaxRows(), rows - sh.getMaxRows());
+  if (sh.getMaxRows() > rows + 1) sh.deleteRows(rows + 2, sh.getMaxRows() - rows - 1);
+  if (sh.getMaxColumns() < cols) sh.insertColumnsAfter(sh.getMaxColumns(), cols - sh.getMaxColumns());
+  if (sh.getMaxColumns() > cols) sh.deleteColumns(cols + 1, sh.getMaxColumns() - cols);
+}

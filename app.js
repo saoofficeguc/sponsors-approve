@@ -83,6 +83,8 @@ const I = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
   out: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/>',
+  cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h3M13 14h3M8 17.5h3"/>',
+  door: '<path d="M5 21V4.5A1.5 1.5 0 0 1 6.5 3h11A1.5 1.5 0 0 1 19 4.5V21M3 21h18M14.5 12.5v.01"/>',
   back: '<path d="M15 6l-6 6 6 6"/>',
 };
 const svg = (name, cls = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" class="${cls}">${I[name] || ''}</svg>`;
@@ -267,7 +269,7 @@ async function boot() {
       <p class="muted" style="margin-top:8px">The SAO Office has to create the first account. See the README ("Put it online").</p></div></div>`;
     return;
   }
-  if (!s.user) return renderLogin(s);
+  if (!s.user) return location.hash.startsWith('#/rooms') ? renderPublicRooms() : renderLogin(s);
   if (s.user.mustChange) return renderMustChange();
   clearInterval(pollTimer);
   pollTimer = setInterval(async () => { try { await loadSession(); updateBell(); } catch (e) { /* offline for a moment */ } }, 60000);
@@ -285,6 +287,7 @@ function renderLogin(s) {
     </form>
     <div class="or"><span>New here?</span></div>
     <button type="button" class="btn ghost block" id="first">First time signing in?</button>
+    <a class="btn ghost block" href="#/rooms" style="margin-top:10px">${svg('cal', 'ic')}See the room calendar</a>
     <p class="muted small" style="margin-top:14px">Forgot your password? Ask the SAO Office to reset it, then use "First time signing in?".</p>
     ${s.demo ? `<div class="demo"><b>Demo accounts</b> <span class="muted">(password ${esc(s.demo.password)})</span>
       ${s.demo.accounts.map(a => `<button type="button" data-email="${esc(a.email)}">${esc(a.name)} — ${esc(a.email)}</button>`).join('')}</div>` : ''}
@@ -425,8 +428,8 @@ function renderMustChange() {
 // [link, label, short label for the phone tab bar, icon, badge]
 function navItems() {
   if (S.user.role === 'sao') return [['#/', 'Dashboard', 'Home', 'home'], ['#/claims', 'All claims', 'Claims', 'list'], ['#/reviews', 'Reviews', 'Reviews', 'review', S.openReviews],
-    ['#/sponsors', 'Sponsors', 'Sponsors', 'grid'], ['#/admin', 'Admin', 'Admin', 'gear', S.openAccess]];
-  return [['#/', 'My sponsors', 'Sponsors', 'home'], ['#/add', 'Add sponsor', 'Add', 'plus'], ['#/requests', 'Requests to SAO', 'Requests', 'chat']];
+    ['#/sponsors', 'Sponsors', 'Sponsors', 'grid'], ['#/rooms', 'Rooms', 'Rooms', 'cal'], ['#/admin', 'Admin', 'Admin', 'gear', S.openAccess]];
+  return [['#/', 'My sponsors', 'Sponsors', 'home'], ['#/add', 'Add sponsor', 'Add', 'plus'], ['#/rooms', 'Rooms', 'Rooms', 'cal'], ['#/requests', 'Requests to SAO', 'Requests', 'chat']];
 }
 const initials = n => String(n || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
 const isDark = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
@@ -499,10 +502,13 @@ const ROUTES = [
   [/^#\/sponsors$/, () => viewSponsors(), 'sao'],
   [/^#\/sponsor\/([^/]+)$/, m => viewSponsor(m[1]), 'sao'],
   [/^#\/admin(?:\/(\w+))?$/, m => viewAdmin(m[1] || 'users'), 'sao'],
+  [/^#\/rooms$/, () => viewRooms($('#main'))],
+  [/^#\/rooms\/mine$/, () => viewMyBookings()],
 ];
 let renderSeq = 0;
 async function render() {
-  if (!S || !S.user) return;
+  stopRoomsLive();
+  if (!S || !S.user) { if (S && !S.needsSetup) (location.hash.startsWith('#/rooms') ? renderPublicRooms() : renderLogin(S)); return; }
   closePop();
   const seq = ++renderSeq;
   frame();
@@ -1021,7 +1027,7 @@ async function viewSponsor(id) {
 }
 
 async function viewAdmin(tab) {
-  const tabs = [['users', 'People', S.openAccess], ['clubs', 'Clubs'], ['categories', 'Categories'], ['settings', 'Rules'], ['audit', 'Audit log']];
+  const tabs = [['users', 'People', S.openAccess], ['clubs', 'Clubs'], ['categories', 'Categories'], ['rooms', 'Rooms'], ['settings', 'Rules'], ['audit', 'Audit log']];
   const head = `<div class="page-head"><div><h1>Admin</h1><p class="muted">Accounts, clubs, categories and the full log of changes.</p></div></div>
     <nav class="tabs" aria-label="Admin">${tabs.map(([k, t, n]) => `<a href="#/admin/${k}" class="${k === tab ? 'on' : ''}">${t}${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>`;
   const main = $('#main');
@@ -1101,6 +1107,9 @@ async function viewAdmin(tab) {
     $$('[data-edit]').forEach(b => b.onclick = () => { const x = list.find(y => y.id === b.dataset.edit);
       dialog({ title: 'Edit ' + one, body: field('Name', `<input class="input" name="name" value="${esc(x.name)}" required maxlength="100">`) + `<label class="check"><input type="checkbox" name="active" ${x.active ? 'checked' : ''}> In use</label>`,
         onSubmit: async v => { await POST(`/api/${tab}/${x.id}`, { name: v.name, active: !!v.active }); toast('Saved'); refresh(); } }); });
+  } else if (tab === 'rooms') {
+    main.innerHTML = head + '<div id="rooms-admin"></div>';
+    await viewRoomsAdmin($('#rooms-admin'));
   } else if (tab === 'settings') {
     main.innerHTML = head + `<div class="narrow">
       <form class="card stack" id="set" novalidate><h2>Limits</h2>
@@ -1116,7 +1125,10 @@ async function viewAdmin(tab) {
     main.innerHTML = head + `<div class="card flush"><div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>Change</th><th>Reason</th></tr></thead><tbody id="log"></tbody></table></div>
       <div style="padding:14px 20px"><button class="btn ghost" id="more">Load more</button></div></div>`;
     // Plain-English names for the log's codes and fields; ids and empty values are left out
-    const ACT = { login: 'Signed in', setup: 'Set up the site', 'claim.reserve': 'Reserved a sponsor', 'claim.hold': 'Look-alike sent to review',
+    const ACT = { login: 'Signed in', setup: 'Set up the site', 'booking.create': 'Booked a room', 'booking.edit': 'Changed a room booking',
+      'booking.cancel': 'Cancelled a room booking', 'room.create': 'Added a room', 'room.edit': 'Edited a room', 'slot.edit': 'Changed slot times or limit',
+      'rooms.settings': 'Changed room settings', 'rooms.sheet-secret': 'Made a new sheet key', 'rooms.block': 'Blocked rooms', 'rooms.unblock': 'Removed a block',
+      'rooms.export': 'Exported room bookings', 'rooms.sheet-sync': 'Synced the security sheet', 'claim.reserve': 'Reserved a sponsor', 'claim.hold': 'Look-alike sent to review',
       'claim.blocked': 'Tried an unavailable sponsor', 'claim.status': 'Changed a status', 'claim.note': 'Added a note', 'claim.release': 'Released a claim',
       'claim.extend': 'Extended a reservation', 'claim.assign': 'Assigned a sponsor', 'claim.reassign': 'Reassigned a sponsor', 'claim.expire': 'Reservation ended',
       'claim.delete': 'Deleted a sponsor claim', 'sponsor.create': 'New sponsor in the registry', 'sponsor.edit': 'Edited a sponsor', 'sponsor.merge': 'Merged sponsors',
@@ -1152,4 +1164,4 @@ async function viewAdmin(tab) {
   }
 }
 
-boot();
+document.addEventListener('DOMContentLoaded', boot);

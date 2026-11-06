@@ -8,6 +8,7 @@ import { createAuth, hashPassword, passwordProblem, newId } from './auth.mjs';
 import { normName, possibleMatch, parseInstagram } from './match.mjs';
 import { addLocalDays, localDate, localDayStart, isDate } from './time.mjs';
 import { seedBasics, seedDemo, syncClubs, DEMO_PASSWORD } from './setup.mjs';
+import { registerRooms, seedRooms } from './rooms.mjs';
 
 export const RESERVE_DAYS = 14;
 const WARN_DAYS = [3, 1];   // in-site reminders this many days before a reservation ends
@@ -68,13 +69,14 @@ function rateLimit(key, max, windowMs, now) {
  * allowSetup  whether the first SAO Head account can be created from the website
  * setupCode   if set, the first-time setup form must be given this code
  */
-export function createApp({ driver, now = () => Date.now(), allowSetup = true, setupCode = '' }) {
+// background(promise): keeps work going after the reply is sent (the security sheet update)
+export function createApp({ driver, now = () => Date.now(), allowSetup = true, setupCode = '', background = p => p.catch(e => console.error(e)) }) {
   const db = createDb(driver);
   const auth = createAuth(db, now);
   const { q, one } = db;
 
   let schemaP = null;
-  const ready = () => (schemaP ||= ensureSchema(driver).then(() => db.tx(() => syncClubs(db))).catch(e => { schemaP = null; throw e; }));
+  const ready = () => (schemaP ||= ensureSchema(driver).then(() => db.tx(() => syncClubs(db))).then(() => db.tx(() => seedRooms(db))).catch(e => { schemaP = null; throw e; }));
   // A club's logo: a built-in picture (assets/clubs/...) or one SAO uploaded (served by /api/clubs/:id/logo)
   const CLUB_COLS = 'id, name, active, logo, logo_v, CASE WHEN logo_data IS NULL THEN 0 ELSE 1 END AS uploaded';
   const clubOut = c => ({ id: c.id, name: c.name, active: !!Number(c.active), logo: Number(c.uploaded) ? null : c.logo || null,
@@ -288,6 +290,7 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     if (!emailOk(email)) fail(400, 'Enter a valid email address.');
     const p = passwordProblem(body.password); if (p) fail(400, p);
     await seedBasics(db);
+    await seedRooms(db);
     const id = newId();
     await q('INSERT INTO sp_users (id, email, name, role, club_id, pass, active, must_change, created_at) VALUES ($1, $2, $3, $4, NULL, $5, 1, 0, $6)',
       [id, email, name, 'sao', hashPassword(body.password), now()]);
@@ -991,6 +994,7 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     }
     const reps = Number((await one('SELECT COUNT(*) AS n FROM sp_users WHERE club_id = $1', [c.id]))?.n || 0);
     await q('DELETE FROM sp_users WHERE club_id = $1', [c.id]);
+    await q('DELETE FROM sp_bookings WHERE club_id = $1', [c.id]);
     await q('DELETE FROM sp_clubs WHERE id = $1', [c.id]);
     await audit(user, 'club.delete', 'clubs', null, { name: c.name, accounts: reps });
     return { ok: true };
@@ -1023,6 +1027,9 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
       before: a.before_value ? JSON.parse(a.before_value) : null, after: a.after_value ? JSON.parse(a.after_value) : null, reason: a.reason }));
   });
 
+  // ---------- club room booking (rooms.mjs) ----------
+  const rooms = registerRooms({ on, q, one, db, fail, need, str, now, audit, notifyClub, rateLimit, CLUB_COLS, clubOut, Reply });
+
   // ---------- handle one request ----------
   async function handle(request, { ip = '' } = {}) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
@@ -1046,13 +1053,15 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '') || null;
     try {
       await ready();
+      const later = [];   // work to start once the change is saved (for example updating the security sheet)
       const out = await db.tx(async () => {
         await sweep();
         const user = await auth.sessionUser(token);
         if (match.r.role !== 'none' && !user) fail(401, 'Please sign in again.');
         if (match.r.role === 'sao' && user.role !== 'sao') fail(403, DENIED);
-        return match.r.fn({ user, body, params: url.searchParams, args: match.args, token, ip });
+        return match.r.fn({ user, body, params: url.searchParams, args: match.args, token, ip, defer: fn => { if (!later.includes(fn)) later.push(fn); } });
       });
+      for (const fn of later) background(Promise.resolve().then(fn));
       if (out instanceof Response) return out;
       if (out instanceof Reply) return typeof out.body === 'string' ? respond(out.status, out.body, 'text/csv; charset=utf-8') : respond(out.status, out.body);
       return respond(200, out ?? { ok: true });
@@ -1063,5 +1072,5 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     }
   }
 
-  return { handle, ready, sweep };
+  return { handle, ready, sweep, rooms };
 }

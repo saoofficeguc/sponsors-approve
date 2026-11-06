@@ -8,7 +8,9 @@ const { sqliteDriver } = createRequire(import.meta.url)('../scripts/sqlite-drive
 
 let clock = Date.parse('2026-11-05T10:00:00Z');
 const DAY = 86400000;
-const app = createApp({ driver: sqliteDriver(':memory:'), now: () => clock });
+const driver = sqliteDriver(':memory:');
+const pending = [];   // background work (the sheet update), so tests can wait for it
+const app = createApp({ driver, now: () => clock, background: p => { const w = p.catch(e => console.error(e)); pending.push(w); return w; } });
 
 // Every new sponsor needs its Instagram profile link. Tests that are about something else get one made from the
 // sponsor's name (same name -> same link); tests about Instagram itself pass their own.
@@ -349,6 +351,121 @@ test('a new sponsor needs its Instagram profile link; the same account can never
   // choosing an existing sponsor from the suggestions needs no link
   const free = (await call('GET', '/api/sponsors/search?q=Starbright', null, C)).data.find(s => s.available);
   if (free) assert.notEqual((await call('POST', '/api/claims', { sponsorId: free.id }, C)).status, 400);
+});
+
+// ---------- club room booking ----------
+const today = () => new Date(clock).toISOString().slice(0, 10);
+const nextDay = (want, after = 1) => { let d = Date.parse(today() + 'T12:00:00Z') + after * 86400000; while (new Date(d).getUTCDay() !== want) d += 86400000; return new Date(d).toISOString().slice(0, 10); };
+const asDMY = d => d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4);
+let cal, room, MON;
+test('rooms: the calendar is public and starts with the rooms and slot times', async () => {
+  MON = nextDay(1);
+  cal = (await call('GET', '/api/rooms/calendar?from=' + MON + '&to=' + MON)).data;
+  assert.deepEqual(cal.slots.map(s => [s.id, s.maxPerDay]), [['fifth', 5], ['after', 2]]);
+  assert.equal(cal.rooms.filter(r => r.afterHours).length, 9);
+  assert.ok(cal.rooms.some(r => r.code === 'H10' && r.fifth && !r.afterHours));
+  room = code => cal.rooms.find(r => r.code === code).id;
+});
+
+test('rooms: one club per room per slot, and the blocked club is told who has it', async () => {
+  assert.equal((await call('POST', '/api/bookings', { date: MON, slotId: 'after', roomId: room('C5.101'), purpose: 'Weekly meeting' }, A)).status, 200);
+  const b = await call('POST', '/api/bookings', { date: MON, slotId: 'after', roomId: room('C5.101') }, B);
+  assert.equal(b.status, 409); assert.equal(b.data.code, 'taken');
+  assert.ok(b.data.error.includes(clubs[0].name)); assert.ok(b.data.suggest.length && !b.data.suggest.includes('C5.101'));
+  // the same room in the other slot is a different booking
+  assert.equal((await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room('C5.101') }, B)).status, 200);
+});
+
+test('rooms: at most 2 after-hours and 5 fifth-slot rooms per club per day, counted separately', async () => {
+  assert.equal((await call('POST', '/api/bookings', { date: MON, slotId: 'after', roomId: room('C5.102') }, A)).status, 200);
+  const third = await call('POST', '/api/bookings', { date: MON, slotId: 'after', roomId: room('C5.104') }, A);
+  assert.equal(third.status, 409); assert.equal(third.data.code, 'limit'); assert.match(third.data.error, /already has 2 after-hours rooms/);
+  for (const c of ['C5.201', 'C5.202', 'C5.203', 'C5.204', 'C5.205'])
+    assert.equal((await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room(c) }, A)).status, 200, c);
+  assert.equal((await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room('C5.206') }, A)).data.code, 'limit');
+  // another day starts fresh
+  assert.equal((await call('POST', '/api/bookings', { date: nextDay(2), slotId: 'after', roomId: room('C5.104') }, A)).status, 200);
+});
+
+test('rooms: days, rooms and times that cannot be booked', async () => {
+  const bad = async (b, re) => { const r = await call('POST', '/api/bookings', b, C); assert.equal(r.status, 400, JSON.stringify(r.data)); assert.match(r.data.error, re); };
+  await bad({ date: nextDay(4), slotId: 'after', roomId: room('C5.105') }, /only be booked on Sun, Mon, Tue, Wed/);
+  await bad({ date: '2026-08-02', slotId: 'after', roomId: room('C5.105') }, /open from 13\/09\/2026/);
+  await bad({ date: MON, slotId: 'after', roomId: room('C5.201') }, /can't be booked for the after hours/);
+  await bad({ date: MON, slotId: 'fifth', roomId: room('C5.105'), start: '12:00', end: '13:00' }, /choose times inside it/);
+  await bad({ date: MON, slotId: 'fifth', roomId: room('C5.105'), start: '17:00', end: '16:30' }, /end time must be after/);
+  const ok = await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room('C5.105'), start: '16:30', end: '18:00' }, C);
+  assert.equal(ok.status, 200);
+  // reps never choose the club: it comes from the account
+  const sneaky = await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room('C5.106'), clubId: clubs[0].id }, C);
+  assert.equal((await call('GET', '/api/rooms/calendar?from=' + MON + '&to=' + MON)).data.bookings.find(b => b.id === sneaky.data.id).clubId, clubs[2].id);
+});
+
+test('rooms: reps grabbing the same room at the same moment, only one wins', async () => {
+  const res = await Promise.all([A, B, C].map(t => call('POST', '/api/bookings', { date: nextDay(3), slotId: 'after', roomId: room('H12') }, t)));
+  assert.equal(res.filter(r => r.status === 200).length, 1);
+});
+
+test('rooms: SAO can override a limit, block rooms (which cancels bookings) and see who booked', async () => {
+  const over = { date: MON, slotId: 'after', roomId: room('C5.104'), clubId: clubs[0].id };
+  assert.equal((await call('POST', '/api/bookings', over, sao)).data.code, 'limit');
+  const ok = await call('POST', '/api/bookings', { ...over, override: true }, sao);
+  assert.equal(ok.status, 200);
+  const c = (await call('GET', '/api/rooms/calendar?from=' + MON + '&to=' + MON, null, sao)).data;
+  assert.equal(c.bookings.find(b => b.id === ok.data.id).override, true);
+  assert.ok(c.bookings.every(b => 'by' in b));
+  assert.ok((await call('GET', '/api/rooms/calendar?from=' + MON + '&to=' + MON)).data.bookings.every(b => !('by' in b)));   // public: no personal details
+  // block C5.102 on Monday: club A's booking there is cancelled and the club is told
+  const blk = await call('POST', '/api/blocks', { date: MON, roomId: room('C5.102'), reason: 'Exam' }, sao);
+  assert.equal(blk.data.cancelled, 1);
+  assert.ok((await call('GET', '/api/notices', null, A)).data.some(n => /C5\.102.*blocked it: Exam/.test(n.text)));
+  assert.equal((await call('POST', '/api/bookings', { date: MON, slotId: 'after', roomId: room('C5.102') }, B)).data.code, 'blocked');
+  // clubs cannot block or manage rooms
+  assert.equal((await call('POST', '/api/blocks', { date: MON, reason: 'mine' }, A)).status, 403);
+  assert.equal((await call('POST', '/api/rooms', { code: 'X1', afterHours: true }, A)).status, 403);
+});
+
+test('rooms: a club cancels its own booking (freeing the room at once), never another club\'s', async () => {
+  const mine = (await call('GET', '/api/bookings/mine', null, A)).data.find(b => b.room === 'C5.101' && b.slotId === 'after' && b.active);
+  const other = (await call('GET', '/api/bookings/mine', null, B)).data.find(b => b.active);
+  assert.equal((await call('POST', '/api/bookings/' + other.id + '/cancel', {}, A)).status, 403);
+  assert.equal((await call('POST', '/api/bookings/' + mine.id + '/cancel', {}, A)).status, 200);
+  assert.equal((await call('POST', '/api/bookings', { date: MON, slotId: 'after', roomId: room('C5.101') }, B)).status, 200);
+  // the cancelled booking is kept (never deleted)
+  assert.ok((await call('GET', '/api/bookings/mine', null, A)).data.some(b => b.id === mine.id && !b.active));
+});
+
+test('rooms: CSV in the sheet layout, and the security sheet gets a fresh copy after each change', async () => {
+  const csv = (await call('GET', '/api/rooms/export.csv', null, sao)).data;
+  const head = csv.split('\r\n')[0];
+  assert.match(head, /Date,Day,C5\.101,C5\.102/); assert.match(head, /Fifth slot 1/);
+  // a pretend Google Sheet that records what it receives
+  const http = await import('node:http');
+  const got = [];
+  const srv = http.createServer((req, res) => { let b = ''; req.on('data', c => b += c); req.on('end', () => { got.push(JSON.parse(b)); res.end('{"ok":true}'); }); });
+  await new Promise(r => srv.listen(0, r));
+  const { createDb } = await import('../supabase/functions/_shared/core/db.mjs');
+  await createDb(driver).meta('sheet_url', 'http://127.0.0.1:' + srv.address().port + '/');
+  const set = (await call('GET', '/api/rooms-settings', null, sao)).data;
+  const sy = await call('POST', '/api/rooms-sheet/sync', {}, sao);
+  assert.equal(sy.data.ok, true, JSON.stringify(sy));
+  assert.equal(got[0].secret, set.sheetSecret);
+  assert.deepEqual(got[0].tabs.map(t => t.name), ['Today', 'Next 7 days', 'After hours', 'Fifth slot']);
+  const grid = got[0].tabs.find(t => t.name === 'After hours');
+  const monRow = grid.rows.find(r => r[0].endsWith(asDMY(MON)));
+  assert.equal(monRow[grid.header.indexOf('C5.101')], clubs[1].name);
+  assert.equal(monRow[grid.header.indexOf('C5.102')], 'Blocked');
+  assert.equal(grid.rows.length, grid.bg.length);
+  // a booking updates the sheet by itself
+  got.length = 0;
+  await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room('H10') }, B);
+  await Promise.all(pending.splice(0));
+  assert.equal(got.length, 1);
+  assert.ok(got[0].tabs[3].rows.some(r => r.includes(clubs[1].name)));
+  // the sheet can fetch its copy with the key, and only with it
+  assert.equal((await call('GET', '/api/rooms-sheet/data?secret=wrong')).status, 403);
+  assert.equal((await call('GET', '/api/rooms-sheet/data?secret=' + set.sheetSecret)).data.tabs.length, 4);
+  srv.close();
 });
 
 test('the logo update fills missing logos only, and keeps an uploaded one', async () => {

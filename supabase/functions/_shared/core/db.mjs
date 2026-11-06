@@ -7,7 +7,7 @@
 // Times are milliseconds since 1970 (BIGINT). Yes/no values are 0 or 1.
 
 const TABLES = ['sp_users', 'sp_clubs', 'sp_categories', 'sp_sponsors', 'sp_aliases', 'sp_claims', 'sp_reviews', 'sp_events',
-  'sp_audit', 'sp_notices', 'sp_sessions', 'sp_failures', 'sp_meta', 'sp_access'];
+  'sp_audit', 'sp_notices', 'sp_sessions', 'sp_failures', 'sp_meta', 'sp_access', 'sp_rooms', 'sp_slots', 'sp_bookings', 'sp_blocks'];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sp_users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, role TEXT NOT NULL,
@@ -43,6 +43,19 @@ CREATE TABLE IF NOT EXISTS sp_meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS sp_access (id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT NOT NULL, club_id TEXT, message TEXT, state TEXT NOT NULL,
   created_at BIGINT NOT NULL, resolved_at BIGINT, resolved_by TEXT, reason TEXT);
 CREATE INDEX IF NOT EXISTS sp_access_email ON sp_access(email);
+-- Club room booking. Dates are 'YYYY-MM-DD' in Cairo time, times 'HH:MM'.
+CREATE TABLE IF NOT EXISTS sp_rooms (id TEXT PRIMARY KEY, code TEXT NOT NULL, building TEXT, after_hours INTEGER NOT NULL DEFAULT 0,
+  fifth INTEGER NOT NULL DEFAULT 0, capacity INTEGER, active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS sp_slots (id TEXT PRIMARY KEY, name TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL,
+  max_per_day INTEGER NOT NULL, sort INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS sp_bookings (id TEXT PRIMARY KEY, date TEXT NOT NULL, room_id TEXT NOT NULL, slot_id TEXT NOT NULL, club_id TEXT NOT NULL,
+  created_by TEXT, start_time TEXT, end_time TEXT, purpose TEXT, active INTEGER NOT NULL, override INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL,
+  cancelled_at BIGINT, cancelled_by TEXT, cancel_reason TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS sp_one_booking ON sp_bookings(date, room_id, slot_id) WHERE active = 1;
+CREATE INDEX IF NOT EXISTS sp_bookings_date ON sp_bookings(date);
+CREATE INDEX IF NOT EXISTS sp_bookings_club ON sp_bookings(club_id, date);
+CREATE TABLE IF NOT EXISTS sp_blocks (id TEXT PRIMARY KEY, date TEXT NOT NULL, room_id TEXT, slot_id TEXT, reason TEXT, created_by TEXT, created_at BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS sp_blocks_date ON sp_blocks(date);
 `;
 // On Supabase, lock every table so the project's public API keys can neither read nor change them.
 // Only the Edge Function (connected as the database owner) can.

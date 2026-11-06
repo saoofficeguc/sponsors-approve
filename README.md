@@ -69,6 +69,39 @@ Accounts:
   sign in soon after SAO adds them; the account shows "Not set up yet" in Admin > People until they do.
 - 8 wrong passwords lock that email for 15 minutes.
 
+## Rooms (club room booking)
+
+Built from *Club Room Booking Platform — Requirements (6 Nov 2026)*; it replaces the "After Hours and booths" sheet.
+
+| Rule | How it works |
+|---|---|
+| Slots | **After hours** (whole block, at most **2** rooms per club per day) and **Fifth slot** (custom start/end inside it allowed, at most **5** per club per day). Counted separately, per day. |
+| One club per room per slot | Checked when booking and backed by a unique index, so two reps clicking at once can't both win. |
+| Days | Term dates and weekdays (Sunday–Wednesday) set in Admin > Rooms. Past days are read-only. |
+| Club | Taken from the rep's account, never typed. |
+| SAO | Books for any club, can tick **Admin override** past a limit (marked on the calendar and sheet), cancels anything, blocks rooms or whole days (bookings there are cancelled and the club is notified). |
+
+- **Calendar** (`#/rooms`): day view (phone default), week view, month view; free / booked / your club / blocked colours;
+  filters by slot, building and club; "only free". Updates by itself every few seconds. **Public:** anyone can open it
+  from the link without signing in (club names shown; who booked is only shown to SAO).
+- **Booking:** tap a free room; the dialog shows the club's remaining quota and, if a room is taken or blocked, says by whom/why
+  and suggests free rooms. **My club's bookings** lists upcoming bookings with cancel and edit (purpose, fifth-slot times).
+- **Admin > Rooms:** term, slot times and limits, rooms (add, edit, archive), blocks, CSV export in the old sheet's layout,
+  and the security Google Sheet.
+- Starting slot times are placeholders until SAO confirms them: fifth slot 15:45–18:30, after hours 18:30–21:30.
+- Notifications are inside the site (email would need an email service).
+
+### Security Google Sheet
+
+Every booking, cancellation and block is copied to a Google Sheet within seconds (and the sheet refreshes itself every
+5 minutes), as neat read-only tabs: **Today**, **Next 7 days**, and grids for **After hours** and **Fifth slot** from this
+week to the end of term (today in yellow, blocked in grey, admin overrides in pink). Setup, once, in Admin > Rooms:
+
+1. Create a new Google Sheet. 2. Extensions › Apps Script: paste the script from **Copy the script** (it has the site's
+address and the sheet key filled in) and save. 3. Run **setup** once and allow access. 4. Deploy › New deployment › Web app,
+Execute as *Me*, access *Anyone*; copy the Web app URL. 5. Paste it in the site and press **Save and sync**.
+Share the sheet with security as *Viewer*. The script template is `assets/sheet/security-sheet.gs.txt`.
+
 ## Put it online (free: GitHub Pages + Supabase)
 
 Same setup as the SAO Portal, on its own Supabase project (all tables here start with `sp_`).
