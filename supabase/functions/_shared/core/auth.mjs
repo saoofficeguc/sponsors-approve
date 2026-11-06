@@ -56,6 +56,8 @@ export function createAuth(db, now) {
     const keys = [`e:${String(email || '').trim().toLowerCase()}`, `ip:${ip || '?'}`];
     for (const k of keys) if (await lockedUntil(k) > now()) return { error: 'Too many wrong attempts. Try again in 15 minutes.', status: 429 };
     const u = await db.one('SELECT * FROM sp_users WHERE email = $1', [String(email || '').trim().toLowerCase()]);
+    // an account SAO added without a password is finished through "First time signing in?"
+    if (u && Number(u.active) && !u.pass) return { error: 'This account is not set up yet. Tap "First time signing in?" below to choose your password.', status: 401, code: 'not-set-up' };
     const ok = u && Number(u.active) && checkPassword(password, u.pass);
     if (!ok) { for (const k of keys) await recordFailure(k); return { error: 'Wrong email or password.', status: 401 }; }
     for (const k of keys) await db.q('DELETE FROM sp_failures WHERE key = $1', [k]);

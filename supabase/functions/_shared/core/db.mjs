@@ -7,7 +7,7 @@
 // Times are milliseconds since 1970 (BIGINT). Yes/no values are 0 or 1.
 
 const TABLES = ['sp_users', 'sp_clubs', 'sp_categories', 'sp_sponsors', 'sp_aliases', 'sp_claims', 'sp_reviews', 'sp_events',
-  'sp_audit', 'sp_notices', 'sp_sessions', 'sp_failures', 'sp_meta'];
+  'sp_audit', 'sp_notices', 'sp_sessions', 'sp_failures', 'sp_meta', 'sp_access'];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sp_users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, role TEXT NOT NULL,
@@ -40,6 +40,9 @@ CREATE INDEX IF NOT EXISTS sp_notices_user ON sp_notices(user_id);
 CREATE TABLE IF NOT EXISTS sp_sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS sp_failures (key TEXT PRIMARY KEY, count INTEGER NOT NULL, until BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS sp_meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS sp_access (id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT NOT NULL, club_id TEXT, message TEXT, state TEXT NOT NULL,
+  created_at BIGINT NOT NULL, resolved_at BIGINT, resolved_by TEXT, reason TEXT);
+CREATE INDEX IF NOT EXISTS sp_access_email ON sp_access(email);
 `;
 // On Supabase, lock every table so the project's public API keys can neither read nor change them.
 // Only the Edge Function (connected as the database owner) can.

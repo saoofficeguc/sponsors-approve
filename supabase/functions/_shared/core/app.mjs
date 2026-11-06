@@ -276,6 +276,7 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
       statuses: STATUS, reserveDays: RESERVE_DAYS, settings: await settings(), unread, today: localDate(now()),
       // SAO: how many review items wait, for the count on the Reviews menu
       openReviews: user.role === 'sao' ? Number((await one(`SELECT COUNT(*) AS n FROM sp_reviews WHERE state = 'open'`))?.n || 0) : undefined,
+      openAccess: user.role === 'sao' ? Number((await one(`SELECT COUNT(*) AS n FROM sp_access WHERE state = 'open'`))?.n || 0) : undefined,
     };
   });
 
@@ -298,7 +299,7 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
   on('POST', '/api/login', 'none', async ({ body, ip }) => {
     rateLimit(`login:${ip}`, 30, 60000, now());
     const r = await auth.login(body.email, body.password, ip);
-    if (r.error) return new Reply(r.status, { error: r.error });
+    if (r.error) return new Reply(r.status, { error: r.error, code: r.code });
     await audit(r.user, 'login', `user:${r.user.id}`);
     return { token: r.token };
   });
@@ -310,6 +311,50 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     await q('UPDATE sp_users SET pass = $1, must_change = 0 WHERE id = $2', [hashPassword(body.next), user.id]);
     await auth.endAllSessions(user.id, token);
     await audit(user, 'user.password', `user:${user.id}`);
+    return { ok: true };
+  });
+
+  // --- First time signing in: SAO added the email -> choose a password; unknown email -> ask SAO for access ---
+  const emailIn = v => { const e = need(v, 'Email', 3, 200).toLowerCase(); if (!emailOk(e)) fail(400, 'Enter a valid email address.'); return e; };
+  on('POST', '/api/first-time/check', 'none', async ({ body, ip }) => {
+    rateLimit(`first:${ip}`, 60, 60000, now());
+    const email = emailIn(body.email);
+    const u = await one('SELECT pass, active FROM sp_users WHERE email = $1', [email]);
+    if (u && !Number(u.active)) return { state: 'disabled' };
+    if (u) return { state: u.pass ? 'already' : 'set-password' };
+    const open = await one(`SELECT id FROM sp_access WHERE email = $1 AND state = 'open'`, [email]);
+    if (open) return { state: 'pending' };
+    const clubs = await q(`SELECT ${CLUB_COLS} FROM sp_clubs WHERE active = 1 ORDER BY sort, name`);
+    const last = await one(`SELECT state, reason FROM sp_access WHERE email = $1 ORDER BY created_at DESC LIMIT 1`, [email]);
+    return { state: 'unknown', clubs: clubs.map(clubOut), declined: last?.state === 'declined' ? { reason: last.reason || null } : undefined };
+  });
+  on('POST', '/api/first-time/password', 'none', async ({ body, ip }) => {
+    rateLimit(`first:${ip}`, 60, 60000, now());
+    const email = emailIn(body.email);
+    const u = await one('SELECT * FROM sp_users WHERE email = $1', [email]);
+    if (!u || !Number(u.active)) fail(400, 'This email has no account yet.');
+    if (u.pass) fail(409, 'This account already has a password. Sign in instead, or ask SAO to reset it.');
+    const p = passwordProblem(body.password); if (p) fail(400, p);
+    if (body.confirm != null && body.confirm !== body.password) fail(400, 'The two passwords are not the same.');
+    await q('UPDATE sp_users SET pass = $1, must_change = 0 WHERE id = $2', [hashPassword(body.password), u.id]);
+    await audit(u, 'user.first', `user:${u.id}`);
+    return { token: await auth.createSession(u.id) };
+  });
+  on('POST', '/api/first-time/request', 'none', async ({ body, ip }) => {
+    rateLimit(`access:${ip}`, 20, 60000, now());
+    const email = emailIn(body.email);
+    if (await one('SELECT id FROM sp_users WHERE email = $1', [email])) fail(409, 'This email already has an account. Go back and choose "First time signing in?" again.');
+    const name = need(body.name, 'Your name', 2, 100), message = str(body.message, 500);
+    const club = await one('SELECT id, name FROM sp_clubs WHERE id = $1 AND active = 1', [String(body.clubId || '')]);
+    if (!club) fail(400, 'Choose your club.');
+    const open = await one(`SELECT id FROM sp_access WHERE email = $1 AND state = 'open'`, [email]);
+    if (open) await q('UPDATE sp_access SET name = $1, club_id = $2, message = $3, created_at = $4 WHERE id = $5', [name, club.id, message || null, now(), open.id]);
+    else await q(`INSERT INTO sp_access (id, email, name, club_id, message, state, created_at) VALUES ($1, $2, $3, $4, $5, 'open', $6)`,
+      [newId(), email, name, club.id, message || null, now()]);
+    for (const s of await q(`SELECT id FROM sp_users WHERE role = 'sao' AND active = 1`))
+      await q('INSERT INTO sp_notices (id, user_id, at, text, link, seen) VALUES ($1, $2, $3, $4, $5, 0)',
+        [newId(), s.id, now(), `${name} (${email}) asks for access as ${club.name}'s representative.`, '#/admin/users']);
+    await audit(null, 'access.request', 'access', null, { email, name, club: club.name });
     return { ok: true };
   });
 
@@ -765,10 +810,11 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
   });
 
   // --- people, clubs, categories, settings, audit ---
-  on('GET', '/api/users', 'sao', async () => (await q(`SELECT u.id, u.email, u.name, u.role, u.club_id, u.active, u.must_change, u.created_at, c.name AS club
+  on('GET', '/api/users', 'sao', async () => (await q(`SELECT u.id, u.email, u.name, u.role, u.club_id, u.active, u.must_change, u.created_at,
+    CASE WHEN u.pass IS NULL THEN 0 ELSE 1 END AS has_pass, c.name AS club
     FROM sp_users u LEFT JOIN sp_clubs c ON c.id = u.club_id ORDER BY u.role DESC, c.name, u.name`))
     .map(u => ({ id: u.id, email: u.email, name: u.name, role: u.role, clubId: u.club_id, club: u.club, active: !!Number(u.active),
-      mustChange: !!Number(u.must_change), createdAt: Number(u.created_at) })));
+      mustChange: !!Number(u.must_change), setUp: !!Number(u.has_pass), createdAt: Number(u.created_at) })));
 
   async function userFields(body, existing) {
     const name = need(body.name, 'Name', 2, 100), email = need(body.email, 'Email', 3, 200).toLowerCase();
@@ -785,11 +831,15 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
   }
   on('POST', '/api/users', 'sao', async ({ user, body }) => {
     const f = await userFields(body);
-    const p = passwordProblem(body.password); if (p) fail(400, p);
+    // No password: the person chooses their own with "First time signing in?"
+    const pw = typeof body.password === 'string' && body.password ? body.password : null;
+    if (pw) { const p = passwordProblem(pw); if (p) fail(400, p); }
     const id = newId();
-    await q('INSERT INTO sp_users (id, email, name, role, club_id, pass, active, must_change, created_at) VALUES ($1, $2, $3, $4, $5, $6, 1, 1, $7)',
-      [id, f.email, f.name, f.role, f.clubId, hashPassword(body.password), now()]);
-    await audit(user, 'user.create', `user:${id}`, null, f);
+    await q('INSERT INTO sp_users (id, email, name, role, club_id, pass, active, must_change, created_at) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8)',
+      [id, f.email, f.name, f.role, f.clubId, pw ? hashPassword(pw) : null, pw ? 1 : 0, now()]);
+    // an open access request for this email is now answered
+    await q(`UPDATE sp_access SET state = 'approved', resolved_at = $1, resolved_by = $2 WHERE email = $3 AND state = 'open'`, [now(), user.id, f.email]);
+    await audit(user, 'user.create', `user:${id}`, null, { ...f, firstTimeSignIn: !pw });
     return { ok: true, id };
   });
   on('POST', '/api/users/:id', 'sao', async ({ user, args, body }) => {
@@ -802,10 +852,50 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     if (body.password) {
       const p = passwordProblem(body.password); if (p) fail(400, p);
       await q('UPDATE sp_users SET pass = $1, must_change = 1 WHERE id = $2', [hashPassword(body.password), u.id]);
+    } else if (body.resetToFirstTime) {
+      // forgotten password: they choose a new one through "First time signing in?"
+      if (u.id === user.id) fail(400, 'Change your own password from the account menu instead.');
+      await q('UPDATE sp_users SET pass = NULL, must_change = 0 WHERE id = $1', [u.id]);
     }
-    if (body.password || !active || f.role !== u.role || f.clubId !== u.club_id) await auth.endAllSessions(u.id);
+    const reset = !!(body.password || body.resetToFirstTime);
+    if (reset || !active || f.role !== u.role || f.clubId !== u.club_id) await auth.endAllSessions(u.id);
     await audit(user, 'user.edit', `user:${u.id}`, { name: u.name, email: u.email, role: u.role, clubId: u.club_id, active: !!Number(u.active) },
-      { ...f, active: !!active, passwordReset: !!body.password });
+      { ...f, active: !!active, passwordReset: reset });
+    return { ok: true };
+  });
+
+  // --- access requests from people whose email SAO had not added ---
+  on('GET', '/api/access-requests', 'sao', async () => (await q(`SELECT a.*, c.name AS club, u.name AS by_name FROM sp_access a
+    LEFT JOIN sp_clubs c ON c.id = a.club_id LEFT JOIN sp_users u ON u.id = a.resolved_by
+    ORDER BY CASE WHEN a.state = 'open' THEN 0 ELSE 1 END, a.created_at DESC LIMIT 100`))
+    .map(a => ({ id: a.id, email: a.email, name: a.name, clubId: a.club_id, club: a.club, message: a.message, state: a.state,
+      createdAt: Number(a.created_at), resolvedAt: num(a.resolved_at), resolvedBy: a.by_name, reason: a.reason })));
+  // Approving creates the rep account without a password; the rep then uses "First time signing in?"
+  on('POST', '/api/access-requests/:id/approve', 'sao', async ({ user, args, body }) => {
+    const a = await one('SELECT * FROM sp_access WHERE id = $1', [args.id]);
+    if (!a || a.state !== 'open') fail(409, 'This request is already answered.');
+    if (await one('SELECT id FROM sp_users WHERE email = $1', [a.email])) fail(409, 'This email already has an account.');
+    const clubId = String(body.clubId || a.club_id || '');
+    if (!(await one('SELECT id FROM sp_clubs WHERE id = $1', [clubId]))) fail(400, 'Choose the club.');
+    const name = str(body.name, 100) || a.name, id = newId();
+    await q('INSERT INTO sp_users (id, email, name, role, club_id, pass, active, must_change, created_at) VALUES ($1, $2, $3, $4, $5, NULL, 1, 0, $6)',
+      [id, a.email, name, 'rep', clubId, now()]);
+    await q(`UPDATE sp_access SET state = 'approved', club_id = $1, resolved_at = $2, resolved_by = $3 WHERE id = $4`, [clubId, now(), user.id, a.id]);
+    await audit(user, 'access.approve', `user:${id}`, null, { email: a.email, name, clubId });
+    return { ok: true, id };
+  });
+  on('POST', '/api/access-requests/:id/decline', 'sao', async ({ user, args, body }) => {
+    const a = await one('SELECT * FROM sp_access WHERE id = $1', [args.id]);
+    if (!a || a.state !== 'open') fail(409, 'This request is already answered.');
+    await q(`UPDATE sp_access SET state = 'declined', resolved_at = $1, resolved_by = $2, reason = $3 WHERE id = $4`, [now(), user.id, str(body.reason, 300) || null, a.id]);
+    await audit(user, 'access.decline', 'access', null, { email: a.email }, str(body.reason, 300) || null);
+    return { ok: true };
+  });
+  on('POST', '/api/access-requests/:id/delete', 'sao', async ({ user, args }) => {
+    const a = await one('SELECT email FROM sp_access WHERE id = $1', [args.id]);
+    if (!a) fail(404, 'Not found.');
+    await q('DELETE FROM sp_access WHERE id = $1', [args.id]);
+    await audit(user, 'access.delete', 'access', null, { email: a.email });
     return { ok: true };
   });
 

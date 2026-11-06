@@ -273,6 +273,11 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-to
 .lockup .brand-bars { margin: 6px 0 6px; }
 .lockup span { display: block; font-weight: 700; font-size: 14px; }
 .lockup .ar { font-weight: 500; font-size: 13px; color: var(--grey); }
+.or { display: flex; align-items: center; gap: 12px; margin: 20px 0 12px; color: var(--faint); font-size: 13px; font-weight: 600; }
+.or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.access-card { border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.access-card + .access-card { margin-top: 10px; }
+.access-card .grow { flex: 1; min-width: 200px; }
 .demo { margin-top: 20px; font-size: 14px; border-top: 1px solid var(--line); padding-top: 16px; max-height: 220px; overflow: auto; }
 .demo button { display: block; background: none; border: 0; padding: 4px 0; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; text-align: left; }
 

@@ -273,6 +273,60 @@ test('a rejected or withdrawn look-alike name does not stay behind as a free spo
   assert.equal((await call('POST', '/api/claims', { name: 'Starbright Coffee Egypt', categoryId: cats.Other }, C)).data.error, 'This sponsor is currently unavailable.');
 });
 
+test('first time signing in: SAO adds only the email, the rep chooses a password', async () => {
+  const club = clubs.find(c => c.name === 'GDG GUC');
+  assert.equal((await call('POST', '/api/users', { name: 'New Rep', email: 'New.Rep@club.test', role: 'rep', clubId: club.id }, sao)).status, 200);
+  const u = (await call('GET', '/api/users', null, sao)).data.find(x => x.email === 'new.rep@club.test');
+  assert.equal(u.setUp, false);
+  // signing in normally explains what to do
+  const early = await call('POST', '/api/login', { email: 'new.rep@club.test', password: 'whatever1' });
+  assert.equal(early.status, 401); assert.equal(early.data.code, 'not-set-up');
+  assert.equal((await call('POST', '/api/first-time/check', { email: ' NEW.rep@club.test ' })).data.state, 'set-password');
+  assert.equal((await call('POST', '/api/first-time/password', { email: 'new.rep@club.test', password: 'short' })).status, 400);
+  assert.equal((await call('POST', '/api/first-time/password', { email: 'new.rep@club.test', password: 'Chosen123', confirm: 'Chosen124' })).status, 400);
+  const done = await call('POST', '/api/first-time/password', { email: 'new.rep@club.test', password: 'Chosen123', confirm: 'Chosen123' });
+  assert.equal(done.status, 200); assert.ok(done.data.token);
+  assert.equal((await call('GET', '/api/session', null, done.data.token)).data.user.clubId, club.id);
+  // nobody can set it a second time
+  assert.equal((await call('POST', '/api/first-time/password', { email: 'new.rep@club.test', password: 'Hijack123' })).status, 409);
+  assert.equal((await call('POST', '/api/first-time/check', { email: 'new.rep@club.test' })).data.state, 'already');
+  assert.equal((await call('POST', '/api/login', { email: 'new.rep@club.test', password: 'Chosen123' })).status, 200);
+  // forgotten password: SAO sends them back through first-time sign-in
+  assert.equal((await call('POST', `/api/users/${u.id}`, { name: 'New Rep', email: 'new.rep@club.test', role: 'rep', clubId: club.id, resetToFirstTime: true }, sao)).status, 200);
+  assert.ok(!(await call('GET', '/api/session', null, done.data.token)).data.user);   // signed out everywhere
+  assert.equal((await call('POST', '/api/first-time/check', { email: 'new.rep@club.test' })).data.state, 'set-password');
+});
+
+test('first time signing in with an unknown email sends an access request to SAO', async () => {
+  const club = clubs.find(c => c.name === 'TEDxGUC');
+  const chk = (await call('POST', '/api/first-time/check', { email: 'stranger@club.test' })).data;
+  assert.equal(chk.state, 'unknown'); assert.ok(chk.clubs.some(c => c.id === club.id));
+  assert.equal((await call('POST', '/api/first-time/request', { email: 'stranger@club.test', name: 'S', clubId: club.id })).status, 400);
+  assert.equal((await call('POST', '/api/first-time/request', { email: 'stranger@club.test', name: 'Sara Stranger', clubId: club.id, message: 'New TEDx rep' })).status, 200);
+  assert.equal((await call('POST', '/api/first-time/check', { email: 'stranger@club.test' })).data.state, 'pending');
+  // SAO sees it, with a notification and a count
+  const s = (await call('GET', '/api/session', null, sao)).data;
+  assert.ok(s.openAccess >= 1);
+  assert.ok((await call('GET', '/api/notices', null, sao)).data.some(n => n.text.includes('stranger@club.test')));
+  const req = (await call('GET', '/api/access-requests', null, sao)).data.find(r => r.email === 'stranger@club.test');
+  assert.equal(req.club, 'TEDxGUC');
+  // clubs cannot see or answer requests
+  assert.equal((await call('GET', '/api/access-requests', null, A)).status, 403);
+  assert.equal((await call('POST', `/api/access-requests/${req.id}/approve`, {}, A)).status, 403);
+  assert.equal((await call('POST', `/api/access-requests/${req.id}/approve`, {}, sao)).status, 200);
+  assert.equal((await call('POST', '/api/first-time/check', { email: 'stranger@club.test' })).data.state, 'set-password');
+  const tok = (await call('POST', '/api/first-time/password', { email: 'stranger@club.test', password: 'Stranger1' })).data.token;
+  assert.equal((await call('GET', '/api/session', null, tok)).data.user.clubId, club.id);
+  // a declined request: the person can see the reason and ask again
+  await call('POST', '/api/first-time/request', { email: 'nope@club.test', name: 'No Body', clubId: club.id }, null);
+  const r2 = (await call('GET', '/api/access-requests', null, sao)).data.find(r => r.email === 'nope@club.test');
+  assert.equal((await call('POST', `/api/access-requests/${r2.id}/decline`, { reason: 'Not a member' }, sao)).status, 200);
+  const again = (await call('POST', '/api/first-time/check', { email: 'nope@club.test' })).data;
+  assert.equal(again.state, 'unknown'); assert.equal(again.declined.reason, 'Not a member');
+  // an email that already has an account cannot send a request
+  assert.equal((await call('POST', '/api/first-time/request', { email: 'a@club.test', name: 'Imposter', clubId: club.id })).status, 409);
+});
+
 test('the logo update fills missing logos only, and keeps an uploaded one', async () => {
   const { createDb } = await import('../supabase/functions/_shared/core/db.mjs');
   const { syncClubs } = await import('../supabase/functions/_shared/core/setup.mjs');

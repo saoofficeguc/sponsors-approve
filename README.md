@@ -56,8 +56,17 @@ Each delete asks for confirmation and leaves one line in the audit log.
 
 On phones the menu is a tab bar at the bottom, and lists show as cards.
 
-Accounts: SAO adds each person with a starting password; they must choose their own on first sign-in.
-8 wrong passwords lock that email for 15 minutes.
+Accounts:
+- SAO adds a person in **Admin > People** with just their email (and club). They open the site, tap
+  **First time signing in?**, enter that email and choose their own password. (SAO can still give a starting password instead.)
+- If the email isn't added, the same screen asks for their name, club and an optional message, and sends an
+  **access request** to SAO (a notification, a count on Admin, and a card at the top of Admin > People). SAO approves
+  (the account is created; they then choose their password the same way) or declines with an optional reason they will see.
+- Forgotten password: SAO edits the account and ticks "let them choose a new one"; the person goes through
+  First time signing in? again. All their sessions are signed out.
+- Note: until a person chooses their password, anyone who knows their email could do it first. Tell people to
+  sign in soon after SAO adds them; the account shows "Not set up yet" in Admin > People until they do.
+- 8 wrong passwords lock that email for 15 minutes.
 
 ## Put it online (free: GitHub Pages + Supabase)
 

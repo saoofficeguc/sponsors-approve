@@ -215,19 +215,100 @@ function renderLogin(s) {
       <p class="err" role="alert"></p>
       <button class="btn key block">Sign in</button>
     </form>
-    <p class="muted small" style="margin-top:16px">Forgot your password? Ask the SAO Office to set a new one.</p>
+    <div class="or"><span>New here?</span></div>
+    <button type="button" class="btn ghost block" id="first">First time signing in?</button>
+    <p class="muted small" style="margin-top:14px">Forgot your password? Ask the SAO Office to reset it, then use "First time signing in?".</p>
     ${s.demo ? `<div class="demo"><b>Demo accounts</b> <span class="muted">(password ${esc(s.demo.password)})</span>
       ${s.demo.accounts.map(a => `<button type="button" data-email="${esc(a.email)}">${esc(a.name)} — ${esc(a.email)}</button>`).join('')}</div>` : ''}
   </div></div>`;
   const form = $('#login');
+  $('#first').onclick = () => renderFirstTime(s, form.email.value);
   form.onsubmit = async e => {
     e.preventDefault();
     const v = Object.fromEntries(new FormData(form));
     $('.err', form).textContent = '';
     try { const r = await POST('/api/login', v); token = r.token; store.set('sp-token', token); location.hash = '#/'; boot(); }
-    catch (err) { $('.err', form).textContent = err.message; }
+    catch (err) {
+      $('.err', form).textContent = err.message;
+      if (err.data && err.data.code === 'not-set-up') renderFirstTime(s, v.email);
+    }
   };
   $$('.demo button').forEach(b => b.onclick = () => { form.email.value = b.dataset.email; form.password.value = s.demo.password; form.requestSubmit(); });
+}
+
+// First time signing in: email -> choose a password (SAO added it) or ask SAO for access (unknown email)
+function renderFirstTime(s, email = '') {
+  const card = inner => { $('#app').innerHTML = `<div class="login"><div class="login-card">${lockup}${inner}
+    <button type="button" class="link-btn small" id="back" style="margin-top:14px;display:block">← Back to sign in</button></div></div>`;
+    $('#back').onclick = () => renderLogin(s); };
+  const stepEmail = (msg = '') => {
+    card(`<h1 style="font-size:26px">First time signing in</h1>
+      <p class="muted" style="margin:6px 0 20px">Enter the email the SAO Office added for you. If it isn't added yet, you can ask for access.</p>
+      <form id="ft" class="stack" novalidate>
+        ${field('Your email', `<input class="input" name="email" type="email" autocomplete="username" required value="${esc(email)}">`)}
+        <p class="err" role="alert">${esc(msg)}</p>
+        <button class="btn key block">Continue</button></form>`);
+    const f = $('#ft');
+    f.email.focus();
+    f.onsubmit = async e => {
+      e.preventDefault(); $('.err', f).textContent = '';
+      email = f.email.value.trim();
+      try {
+        const r = await POST('/api/first-time/check', { email });
+        if (r.state === 'set-password') stepPassword();
+        else if (r.state === 'unknown') stepRequest(r);
+        else if (r.state === 'pending') stepInfo('Your request is waiting', 'The SAO Office has your request. Once they approve it, come back here and choose your password.');
+        else if (r.state === 'already') stepInfo('You already have a password', 'Sign in with it. If you forgot it, ask the SAO Office to reset it, then come back here.');
+        else stepInfo('This account is turned off', 'Contact the SAO Office if you think this is a mistake.');
+      } catch (err) { $('.err', f).textContent = err.message; }
+    };
+  };
+  const stepPassword = () => {
+    card(`<h1 style="font-size:26px">Choose your password</h1>
+      <p class="muted" style="margin:6px 0 20px">Welcome! Your account for <b>${esc(email)}</b> is ready. Choose a password to finish.</p>
+      <form id="ft" class="stack" novalidate>
+        <input type="email" name="email" value="${esc(email)}" autocomplete="username" hidden>
+        ${field('New password', '<input class="input" name="password" type="password" autocomplete="new-password" required>', 'At least 8 characters, with letters and numbers.')}
+        ${field('Type it again', '<input class="input" name="confirm" type="password" autocomplete="new-password" required>')}
+        <p class="err" role="alert"></p>
+        <button class="btn key block">Save and sign in</button></form>`);
+    const f = $('#ft');
+    f.password.focus();
+    f.onsubmit = async e => {
+      e.preventDefault(); $('.err', f).textContent = '';
+      if (f.password.value !== f.confirm.value) { $('.err', f).textContent = 'The two passwords are not the same.'; return; }
+      try {
+        const r = await POST('/api/first-time/password', { email, password: f.password.value, confirm: f.confirm.value });
+        token = r.token; store.set('sp-token', token); location.hash = '#/'; toast('Password saved — welcome!'); boot();
+      } catch (err) { $('.err', f).textContent = err.message; }
+    };
+  };
+  const stepRequest = r => {
+    card(`<h1 style="font-size:26px">Ask for access</h1>
+      <p class="muted" style="margin:6px 0 16px"><b>${esc(email)}</b> isn't added yet. Tell the SAO Office who you are and they'll add you.</p>
+      ${r.declined ? `<div class="banner warn">${svg('info')}<div><b>Your last request was declined</b>${esc(r.declined.reason || 'Contact the SAO Office for details.')}</div></div>` : ''}
+      <form id="ft" class="stack" novalidate>
+        ${field('Your full name', '<input class="input" name="name" autocomplete="name" required maxlength="100">')}
+        ${field('Your club', `<select class="input" name="clubId" required>${opts(r.clubs, '', 'Choose your club')}</select>`)}
+        ${field('Message to SAO <em>(optional)</em>', '<textarea class="input" name="message" maxlength="500" placeholder="For example: I\'m the new sponsorship head."></textarea>')}
+        <p class="err" role="alert"></p>
+        <button class="btn key block">Send request</button></form>
+      <button type="button" class="link-btn small" id="other" style="margin-top:12px;display:block">Use a different email</button>`);
+    const f = $('#ft');
+    f.name.focus();
+    $('#other').onclick = () => stepEmail();
+    f.onsubmit = async e => {
+      e.preventDefault(); $('.err', f).textContent = '';
+      const v = Object.fromEntries(new FormData(f));
+      if (!v.clubId) { $('.err', f).textContent = 'Choose your club.'; return; }
+      try {
+        await POST('/api/first-time/request', { email, ...v });
+        stepInfo('Request sent', `The SAO Office will check it. Once they approve <strong>${esc(email)}</strong>, come back, tap "First time signing in?" and choose your password.`, true);
+      } catch (err) { $('.err', f).textContent = err.message; }
+    };
+  };
+  const stepInfo = (title, text, ok) => card(`<div class="banner ${ok ? 'ok' : 'info'}" style="margin-bottom:0">${svg(ok ? 'confirmed' : 'info')}<div><b>${esc(title)}</b>${text}</div></div>`);
+  stepEmail();
 }
 
 function renderSetup(s) {
@@ -276,7 +357,7 @@ function renderMustChange() {
 // [link, label, short label for the phone tab bar, icon, badge]
 function navItems() {
   if (S.user.role === 'sao') return [['#/', 'Dashboard', 'Home', 'home'], ['#/claims', 'All claims', 'Claims', 'list'], ['#/reviews', 'Reviews', 'Reviews', 'review', S.openReviews],
-    ['#/sponsors', 'Sponsors', 'Sponsors', 'grid'], ['#/admin', 'Admin', 'Admin', 'gear']];
+    ['#/sponsors', 'Sponsors', 'Sponsors', 'grid'], ['#/admin', 'Admin', 'Admin', 'gear', S.openAccess]];
   return [['#/', 'My sponsors', 'Sponsors', 'home'], ['#/add', 'Add sponsor', 'Add', 'plus'], ['#/requests', 'Requests to SAO', 'Requests', 'chat']];
 }
 const initials = n => String(n || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -870,23 +951,35 @@ async function viewSponsor(id) {
 }
 
 async function viewAdmin(tab) {
-  const tabs = [['users', 'People'], ['clubs', 'Clubs'], ['categories', 'Categories'], ['settings', 'Rules'], ['audit', 'Audit log']];
+  const tabs = [['users', 'People', S.openAccess], ['clubs', 'Clubs'], ['categories', 'Categories'], ['settings', 'Rules'], ['audit', 'Audit log']];
   const head = `<div class="page-head"><div><h1>Admin</h1><p class="muted">Accounts, clubs, categories and the full log of changes.</p></div></div>
-    <nav class="tabs" aria-label="Admin">${tabs.map(([k, t]) => `<a href="#/admin/${k}" class="${k === tab ? 'on' : ''}">${t}</a>`).join('')}</nav>`;
+    <nav class="tabs" aria-label="Admin">${tabs.map(([k, t, n]) => `<a href="#/admin/${k}" class="${k === tab ? 'on' : ''}">${t}${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>`;
   const main = $('#main');
   if (tab === 'users') {
-    const users = await GET('/api/users');
-    main.innerHTML = head + `<div class="card flush"><div class="card-head" style="padding-bottom:14px"><h2>${plural(users.length, 'account')}</h2><button class="btn key" id="add">Add account</button></div>
+    const [users, access] = await Promise.all([GET('/api/users'), GET('/api/access-requests')]);
+    const open = access.filter(a => a.state === 'open');
+    if (S.openAccess !== open.length) { S.openAccess = open.length; }
+    const accessCard = open.length ? `<div class="card" style="margin-bottom:16px"><div class="card-head"><h2>Asking for access <span class="count">${open.length}</span></h2>
+        <span class="muted small">They used "First time signing in?" with an email you hadn't added.</span></div>
+      ${open.map(a => `<div class="access-card" data-access="${esc(a.id)}">${logo(clubOf(a.clubId), 40)}<div class="grow"><b>${esc(a.name)}</b> · ${esc(a.email)}
+          <div class="muted small">Wants to represent <b>${esc(a.club || 'a club')}</b> · ${ago(a.createdAt)}</div>${a.message ? `<div class="small" style="margin-top:4px">“${esc(a.message)}”</div>` : ''}</div>
+        <div class="row" style="gap:6px"><button class="btn key sm" data-approve>Approve</button><button class="btn ghost sm" data-decline>Decline</button>
+          <button class="icon-act" data-del-access aria-label="Delete request" title="Delete">${svg('trash')}</button></div></div>`).join('')}</div>` : '';
+    main.innerHTML = head + accessCard + `<div class="card flush"><div class="card-head" style="padding-bottom:14px"><h2>${plural(users.length, 'account')}</h2><button class="btn key" id="add">Add account</button></div>
       <div class="table-wrap"><table class="stackable"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Club</th><th>Status</th><th></th></tr></thead><tbody>
       ${users.map(u => `<tr><td class="first"><b>${esc(u.name)}</b></td><td data-l="Email">${esc(u.email)}</td><td data-l="Role">${u.role === 'sao' ? 'SAO Head' : 'Club rep'}</td>
-        <td data-l="Club">${esc(u.club || '—')}</td><td class="st">${u.active ? (u.mustChange ? '<span class="tag">Starting password</span>' : '<span class="tag">Active</span>') : '<span class="chip released">' + svg('released') + 'Off</span>'}</td>
+        <td data-l="Club">${esc(u.club || '—')}</td><td class="st">${!u.active ? '<span class="chip released">' + svg('released') + 'Off</span>'
+          : !u.setUp ? `<span class="chip pending_review">${svg('pending_review')}Not set up yet</span>` : u.mustChange ? '<span class="tag">Starting password</span>' : '<span class="tag">Active</span>'}</td>
         <td class="act"><div class="row" style="flex-wrap:nowrap;gap:4px"><button class="btn ghost sm" data-edit="${esc(u.id)}">Edit</button>${u.id === S.user.id ? '' : `<button class="icon-act" data-del-user="${esc(u.id)}" aria-label="Delete ${esc(u.name)}" title="Delete">${svg('trash')}</button>`}</div></td></tr>`).join('')}</tbody></table></div></div>`;
     const form = (u = {}) => field('Name', `<input class="input" name="name" value="${esc(u.name || '')}" required maxlength="100">`) +
       field('Email', `<input class="input" type="email" name="email" value="${esc(u.email || '')}" required>`) +
       field('Role', `<select class="input" name="role"><option value="rep" ${u.role !== 'sao' ? 'selected' : ''}>Club representative</option><option value="sao" ${u.role === 'sao' ? 'selected' : ''}>SAO Head</option></select>`) +
       `<div data-clubfield>${field('Club', `<select class="input" name="clubId">${opts(S.clubs, u.clubId || '', 'Choose a club')}</select>`)}</div>` +
-      field(u.id ? 'New password <em>(leave empty to keep)</em>' : 'Starting password', `<div class="row"><input class="input" name="password" style="flex:1" autocomplete="new-password" ${u.id ? '' : 'required'}><button type="button" class="btn ghost sm" data-gen>Make one</button></div>`,
-        'They must choose their own after signing in. Share it with them yourself.') +
+      (u.id ? (u.id === S.user.id ? '' : `<label class="check"><input type="checkbox" name="resetToFirstTime"> Forgot their password: let them choose a new one with "First time signing in?"</label>`)
+        : `<p class="banner ok" style="margin:0">${svg('info')}<span>No password needed. They open the site, tap <strong>First time signing in?</strong>, enter this email and choose their own password.</span></p>`) +
+      `<details${u.id ? '' : ''}><summary class="small" style="cursor:pointer;color:var(--grey);font-weight:600">${u.id ? 'Or set a password yourself' : 'Or give them a starting password instead'}</summary>
+        <div style="margin-top:10px">${field(u.id ? 'New password' : 'Starting password', `<div class="row"><input class="input" name="password" style="flex:1" autocomplete="new-password"><button type="button" class="btn ghost sm" data-gen>Make one</button></div>`,
+        'Share it with them yourself; they must change it after signing in.')}</div></details>` +
       (u.id ? `<label class="check"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}> Can sign in</label>` : '');
     const wire = d => {
       const sync = () => { $('[data-clubfield]', d).hidden = $('[name=role]', d).value === 'sao'; };
@@ -895,11 +988,26 @@ async function viewAdmin(tab) {
         const r = new Uint32Array(10); crypto.getRandomValues(r); r.forEach((x, i) => { p += i % 4 === 3 ? n[x % n.length] : a[x % a.length]; }); $('[name=password]', d).value = p + '7'; };
     };
     $('#add').onclick = () => wire(dialog({ title: 'Add account', key: true, submit: 'Add account', body: form(),
-      onSubmit: async v => { await POST('/api/users', v); toast('Account added'); render(); } }));
+      onSubmit: async v => { if (!v.password) delete v.password; await POST('/api/users', v); toast('Account added'); render(); } }));
+    $$('[data-access]').forEach(card => {
+      const a = open.find(x => x.id === card.dataset.access);
+      $('[data-approve]', card).onclick = () => dialog({ title: `Approve ${a.name}?`, key: true, submit: 'Approve',
+        intro: `This adds <b>${esc(a.email)}</b> as a club representative. They then tap "First time signing in?" and choose their password.`,
+        body: field('Name', `<input class="input" name="name" value="${esc(a.name)}" required maxlength="100">`) +
+          field('Club', `<select class="input" name="clubId">${opts(S.clubs.filter(c => c.active), a.clubId || '')}</select>`, 'Change it if they picked the wrong club.'),
+        onSubmit: async v => { await POST(`/api/access-requests/${a.id}/approve`, v); toast('Approved'); await loadSession(); render(); } });
+      $('[data-decline]', card).onclick = () => dialog({ title: `Decline ${a.name}?`, danger: true, submit: 'Decline',
+        intro: 'They are shown your reason the next time they try "First time signing in?".',
+        body: field('Reason <em>(optional)</em>', '<textarea class="input" name="reason" maxlength="300"></textarea>'),
+        onSubmit: async v => { await POST(`/api/access-requests/${a.id}/decline`, v); toast('Declined'); await loadSession(); render(); } });
+      $('[data-del-access]', card).onclick = () => confirmDelete({ title: 'Delete this request?', url: `/api/access-requests/${a.id}/delete`,
+        text: 'It is removed without an answer.', done: async () => { await loadSession(); render(); } });
+    });
     $$('[data-del-user]').forEach(b => b.onclick = () => { const u = users.find(x => x.id === b.dataset.delUser);
       confirmDelete({ title: `Delete ${u.name}'s account?`, url: `/api/users/${u.id}/delete`, text: `${esc(u.email)} can no longer sign in. Their club's sponsors stay.` }); });
     $$('[data-edit]').forEach(b => b.onclick = () => { const u = users.find(x => x.id === b.dataset.edit);
-      wire(dialog({ title: 'Edit ' + u.name, body: form(u), onSubmit: async v => { v.active = !!v.active; if (!v.password) delete v.password; await POST('/api/users/' + u.id, v); toast('Saved'); render(); } })); });
+      wire(dialog({ title: 'Edit ' + u.name, body: form(u), onSubmit: async v => { v.active = !!v.active; v.resetToFirstTime = !!v.resetToFirstTime; if (!v.password) delete v.password;
+        await POST('/api/users/' + u.id, v); toast(v.resetToFirstTime ? 'Saved — they can now choose a new password' : 'Saved'); render(); } })); });
   } else if (tab === 'clubs' || tab === 'categories') {
     const list = tab === 'clubs' ? S.clubs : S.categories, one = tab === 'clubs' ? 'club' : 'category';
     main.innerHTML = head + `<div class="card"><div class="card-head"><h2>${plural(list.filter(x => x.active).length, one, tab)} in use</h2><button class="btn key" id="add">Add ${one}</button></div>
@@ -947,9 +1055,11 @@ async function viewAdmin(tab) {
       'user.edit': 'Edited an account', 'user.password': 'Changed own password', 'user.delete': 'Deleted an account', 'club.create': 'Added a club',
       'club.edit': 'Edited a club', 'club.logo': 'Uploaded a club logo', 'club.logo.remove': 'Removed a club logo', 'club.delete': 'Deleted a club',
       'category.create': 'Added a category', 'category.edit': 'Edited a category', 'category.delete': 'Deleted a category', 'settings.edit': 'Changed the rules',
-      export: 'Exported CSV', 'clubs.sync': 'Clubs and logos updated' };
+      export: 'Exported CSV', 'clubs.sync': 'Clubs and logos updated', 'user.first': 'Chose their password (first sign-in)',
+      'access.request': 'Asked for access', 'access.approve': 'Approved an access request', 'access.decline': 'Declined an access request',
+      'access.delete': 'Deleted an access request' };
     const FIELD = { categoryId: 'category', clubId: 'club', firstContact: 'first contact', expiresAt: 'ends', stallDays: 'stalled after (days)',
-      maxActive: 'sponsor limit', passwordReset: 'password reset', targetId: 'matched to' };
+      maxActive: 'sponsor limit', passwordReset: 'password reset', targetId: 'matched to', firstTimeSignIn: 'chooses own password' };
     const val = (k, v) => {
       if (k === 'categoryId') return (S.categories.find(c => c.id === v) || {}).name || '';
       if (k === 'clubId') return clubName(v);
