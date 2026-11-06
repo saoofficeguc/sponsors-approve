@@ -41,13 +41,13 @@ Statuses: Reserved → Contacted → In Negotiation → Confirmed, or Rejected (
 
 ## Who can do what
 
-**Club Representative** — My sponsors (own list, filters, deadlines), Add sponsor (live suggestions showing
+**Club Representative** — **Home** shows what needs attention (sponsors about to be released, SAO reviews, the 20 limit, SAO replies), the club's upcoming room bookings and its sponsor numbers. A **+ New** button (the big + in the phone's bottom bar) adds a sponsor, books a room or asks SAO. My sponsors (own list, filters, deadlines), Add sponsor (live suggestions showing
 Available / Unavailable, category, required Instagram profile link), update status and first-contact date, notes,
 history, and *Ask SAO to review* for an unavailable sponsor. In-site notifications.
 **Delete** (bin icon on the list, or on the sponsor's page) erases the club's sponsor completely — its notes, history
 and log entries, for everyone including SAO — and frees the sponsor for other clubs. A club can only delete its own.
 
-**SAO Head** — Dashboard (all clubs with their logos, counts by status, ending soon, stalled, recent activity), All claims with
+**SAO Head** — Dashboard (rooms in use today and this week, all clubs with their logos, counts by status, ending soon, stalled, recent activity), All claims with
 filters and CSV export, Reviews (possible duplicates and club requests), Sponsor registry (rename, other names, Instagram,
 merge, assign/reassign to a club), Admin (people, clubs, categories, the stalled-claim rule, full audit log).
 Release, reassign and extend always need a reason, which is logged.
@@ -84,6 +84,7 @@ Built from *Club Room Booking Platform — Requirements (6 Nov 2026)*; it replac
 - **Calendar** (`#/rooms`): day view as a box per room (phone default), week view, month view; day buttons for this week and next plus a calendar date picker; free / booked / your club / blocked colours;
   filters by slot, building and club; "only free". Updates by itself every few seconds. **Public:** anyone can open it
   from the link without signing in (club names shown; who booked is only shown to SAO).
+- **Weekly repeats:** tick "Repeat every week" and choose until when (up to 20 weeks). Weeks that are taken, blocked or over the limit are skipped and listed; a repeat can be cancelled for one week or for that week and the following ones.
 - **Booking:** tap a free room; the dialog shows the club's remaining quota and, if a room is taken or blocked, says by whom/why
   and suggests free rooms. **My club's bookings** lists upcoming bookings with cancel and edit (purpose, fifth-slot times).
 - **Admin > Rooms:** term, slot times and limits, rooms (add, edit, archive), blocks, CSV export in the old sheet's layout,

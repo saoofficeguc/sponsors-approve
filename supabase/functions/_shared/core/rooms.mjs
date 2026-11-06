@@ -121,7 +121,7 @@ export function registerRooms(x) {
       rooms: (await q(`SELECT * FROM sp_rooms ${sao ? '' : 'WHERE active = 1'} ORDER BY sort`)).map(roomView),
       clubs: clubs.map(clubOut),
       bookings: bookings.map(b => ({ id: b.id, date: b.date, roomId: b.room_id, slotId: b.slot_id, clubId: b.club_id, start: b.start_time, end: b.end_time,
-        purpose: b.purpose || '', override: !!Number(b.override), createdAt: Number(b.created_at),
+        purpose: b.purpose || '', override: !!Number(b.override), createdAt: Number(b.created_at), seriesId: b.series_id || null,
         // a rep's personal details are for SAO only
         ...(sao ? { by: b.by_name || null, byEmail: b.by_email || null } : {}) })),
       blocks: blocks.map(k => ({ id: k.id, date: k.date, roomId: k.room_id, slotId: k.slot_id, reason: k.reason || '' })),
@@ -130,8 +130,8 @@ export function registerRooms(x) {
   });
 
   // ---------- booking ----------
-  on('POST', '/api/bookings', 'any', async ({ user, body, defer }) => {
-    rateLimit(`book:${user.id}`, 60, 60000, now());
+  // One booking, with every rule checked. Used on its own and for each week of a repeat.
+  async function createBooking(user, body, { seriesId = null, quiet = false } = {}) {
     const sao = user.role === 'sao';
     const clubId = sao ? String(body.clubId || '') : user.club_id;
     const club = await one('SELECT id, name FROM sp_clubs WHERE id = $1 AND active = 1', [clubId || '']);
@@ -156,13 +156,44 @@ export function registerRooms(x) {
         : `Your club already has ${max} ${slotWord(slot.id)} room${max === 1 ? '' : 's'} on ${dayLabel(date)}, the most allowed.`, { code: 'limit' });
     const id = newId();
     try {
-      await q(`INSERT INTO sp_bookings (id, date, room_id, slot_id, club_id, created_by, start_time, end_time, purpose, active, override, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11)`, [id, date, room.id, slot.id, club.id, user.id, start, end, purpose || null, used >= max ? 1 : 0, now()]);
+      await q(`INSERT INTO sp_bookings (id, date, room_id, slot_id, club_id, created_by, start_time, end_time, purpose, active, override, created_at, series_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11, $12)`, [id, date, room.id, slot.id, club.id, user.id, start, end, purpose || null, used >= max ? 1 : 0, now(), seriesId]);
     } catch (e) { if (e && (e.code === '23505' || /UNIQUE/i.test(e.message || ''))) fail(409, `${room.code} was just booked by another club. Choose another room.`, { code: 'taken', suggest: await freeRooms(date, slot.id) }); throw e; }
     await audit(user, 'booking.create', `booking:${id}`, null, { club: club.name, room: room.code, slot: slot.name, date: ddmmyyyy(date), start, end, override: used >= max });
-    if (sao && user.club_id !== club.id) await notifyClub(club.id, `SAO booked ${room.code} (${slot.name}) for your club on ${dayLabel(date)}.`, '#/rooms/mine');
+    if (sao && user.club_id !== club.id && !quiet) await notifyClub(club.id, `SAO booked ${room.code} (${slot.name}) for your club on ${dayLabel(date)}.`, '#/rooms/mine');
+    return { id, used: used + 1, max, club, room, slot, date };
+  }
+
+  // A booking, or with repeatUntil the same room and slot every week until that day (up to 20 weeks).
+  // Weeks that can't be booked (taken, blocked, over the limit) are skipped and listed with the reason.
+  on('POST', '/api/bookings', 'any', async ({ user, body, defer }) => {
+    rateLimit(`book:${user.id}`, 60, 60000, now());
+    if (!body.repeatUntil) {
+      const r = await createBooking(user, body);
+      defer(pushSheet);
+      return { ok: true, id: r.id, used: r.used, max: r.max };
+    }
+    const first = String(body.date || ''), t = await term();
+    if (!isDate(first) || !isDate(body.repeatUntil) || body.repeatUntil < first) fail(400, 'Choose the last week to repeat until.');
+    const until = body.repeatUntil > t.end ? t.end : body.repeatUntil;
+    const seriesId = newId(), booked = [], skipped = [];
+    for (let d = first, n = 0; d <= until && n < 20; d = addDays(d, 7), n++) {
+      try {
+        const r = await createBooking(user, { ...body, date: d }, { seriesId, quiet: true });
+        booked.push({ date: d, id: r.id });
+      } catch (e) {
+        if (!e || !e.status) throw e;
+        if (!booked.length && d === first) throw e;   // the first week has to work, like a normal booking
+        skipped.push({ date: d, reason: e.message });
+      }
+    }
+    const room = await one('SELECT code FROM sp_rooms WHERE id = $1', [String(body.roomId)]);
+    const clubId = user.role === 'sao' ? String(body.clubId || '') : user.club_id;
+    if (user.role === 'sao' && user.club_id !== clubId)
+      await notifyClub(clubId, `SAO booked ${room?.code || 'a room'} for your club every week: ${booked.length} week${booked.length === 1 ? '' : 's'} from ${dayLabel(first)}.`, '#/rooms/mine');
+    await audit(user, 'booking.series', `series:${seriesId}`, null, { room: room?.code, from: ddmmyyyy(first), until: ddmmyyyy(until), booked: booked.length, skipped: skipped.length });
     defer(pushSheet);
-    return { ok: true, id, used: used + 1, max };
+    return { ok: true, id: booked[0].id, seriesId, booked, skipped };
   });
 
   async function bookingFor(user, id) {
@@ -190,12 +221,15 @@ export function registerRooms(x) {
     if (!Number(b.active)) fail(409, 'This booking is already cancelled.');
     if (b.date < localDate(now())) fail(400, 'Past bookings cannot be cancelled.');
     const reason = str(body.reason, 300) || null;
-    await q('UPDATE sp_bookings SET active = 0, cancelled_at = $1, cancelled_by = $2, cancel_reason = $3 WHERE id = $4', [now(), user.id, reason, b.id]);
-    await audit(user, 'booking.cancel', `booking:${b.id}`, { club: b.club_name, room: b.code, slot: b.slot_name, date: ddmmyyyy(b.date) }, null, reason);
+    const ids = body.series && b.series_id
+      ? (await q('SELECT id FROM sp_bookings WHERE series_id = $1 AND club_id = $2 AND active = 1 AND date >= $3', [b.series_id, b.club_id, b.date])).map(x => x.id)
+      : [b.id];
+    for (const id of ids) await q('UPDATE sp_bookings SET active = 0, cancelled_at = $1, cancelled_by = $2, cancel_reason = $3 WHERE id = $4', [now(), user.id, reason, id]);
+    await audit(user, 'booking.cancel', `booking:${b.id}`, { club: b.club_name, room: b.code, slot: b.slot_name, date: ddmmyyyy(b.date), weeks: ids.length }, null, reason);
     if (user.role === 'sao' && user.club_id !== b.club_id)
-      await notifyClub(b.club_id, `SAO cancelled your ${b.slot_name.toLowerCase()} booking of ${b.code} on ${dayLabel(b.date)}${reason ? ': ' + reason : '.'}`, '#/rooms/mine');
+      await notifyClub(b.club_id, `SAO cancelled your ${b.slot_name.toLowerCase()} booking of ${b.code} on ${dayLabel(b.date)}${ids.length > 1 ? ` and the ${ids.length - 1} weeks after it` : ''}${reason ? ': ' + reason : '.'}`, '#/rooms/mine');
     defer(pushSheet);
-    return { ok: true };
+    return { ok: true, cancelled: ids.length };
   });
 
   // the club's own list (upcoming and the last 30 days, cancellations included)
@@ -205,7 +239,7 @@ export function registerRooms(x) {
       JOIN sp_slots s ON s.id = b.slot_id LEFT JOIN sp_users u ON u.id = b.created_by
       WHERE b.club_id = $1 AND b.date >= $2 ORDER BY b.date, s.sort, r.sort`, [user.club_id, addDays(localDate(now()), -30)]);
     return rows.map(b => ({ id: b.id, date: b.date, room: b.code, roomId: b.room_id, slotId: b.slot_id, slot: b.slot_name, start: b.start_time, end: b.end_time,
-      purpose: b.purpose || '', active: !!Number(b.active), override: !!Number(b.override), by: b.by_name || 'SAO', createdAt: Number(b.created_at),
+      purpose: b.purpose || '', active: !!Number(b.active), override: !!Number(b.override), by: b.by_name || 'SAO', createdAt: Number(b.created_at), seriesId: b.series_id || null,
       cancelReason: b.cancel_reason || null }));
   });
 

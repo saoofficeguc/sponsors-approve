@@ -118,7 +118,30 @@ async function viewRooms(main, opts = {}) {
     }).join('');
   }
 
+  // On phones the week is a short list per day (booked and blocked rooms), not a wide grid
+  function weekViewPhone() {
+    const s0 = rAdd(st.date, -rWd(st.date));
+    const days = cal.term.weekdays.slice().sort((a, b) => a - b).map(w => rAdd(s0, w));
+    return days.map(d => {
+      if (!teaching(d)) return '';
+      const items = [];
+      for (const s of slotsShown()) for (const r of roomsFor(s.id)) {
+        const x = cellState(d, r, s.id);
+        if ((x.b || x.k) && passesFilters(x)) items.push({ s, r, x });
+      }
+      const free = slotsShown().map(s => `${roomsFor(s.id).filter(r => cellState(d, r, s.id).kind === 'free').length} ${s.name.toLowerCase()}`).join(' · ');
+      return `<section class="wp-day ${d === cal.today ? 'is-today' : ''}"><div class="wp-head"><div><b>${esc(R_DAYS_LONG[rWd(d)])}</b> <span class="muted">${rDMY(d)}</span>
+          <div class="muted small">${d < cal.today ? 'Past' : `Free: ${free}`}</div></div>
+          <button class="btn ${d >= cal.today ? 'key' : 'ghost'} sm" data-goto="${d}">${d >= cal.today && (rep || sao) ? 'Book' : 'Open'}</button></div>
+        ${items.length ? `<ul class="wp-list">${items.map(({ s, r, x }) => `<li ${x.b ? `data-info="${esc(x.b.id)}"` : ''} class="k-${x.kind}">
+            <span class="wp-room">${esc(r.code)}</span><span class="rs ${s.id === 'after' ? 'rs-booked' : 'rs-mine'}">${esc(s.name)}</span>
+            <span class="wp-what">${x.b ? clubChip(x.b, true) : `<span class="muted small">${svg('lock')} ${esc(x.k.reason || 'Blocked')}</span>`}</span></li>`).join('')}</ul>`
+          : '<p class="muted small wp-none">No rooms booked — all free.</p>'}</section>`;
+    }).join('') || `<div class="card">${empty('No booking days this week')}</div>`;
+  }
+
   function weekView() {
+    if (phone) return weekViewPhone();
     const s0 = rAdd(st.date, -rWd(st.date));
     const days = cal.term.weekdays.slice().sort((a, b) => a - b).map(w => rAdd(s0, w));
     const head = `<tr><th class="rw-room">Room</th>${days.map(d => `<th class="${d === cal.today ? 'is-today' : ''}"><button class="link-btn rw-day" data-goto="${d}">${R_DAYS[rWd(d)]}<span>${rDMY(d).slice(0, 5)}</span></button></th>`).join('')}</tr>`;
@@ -269,13 +292,18 @@ function bookDialog(cal, pre, done) {
         <input class="input" name="purpose" maxlength="200" placeholder="…or write it here" style="margin-top:8px"></div>
       ${slot.id === 'fifth' ? `<label class="check"><input type="checkbox" name="part"> Only part of the slot</label>
         <div id="bk-times" class="form-grid" hidden>${field('From', `<input class="input" type="time" name="start" step="300" value="${slot.start}" min="${slot.start}" max="${slot.end}">`)}${field('To', `<input class="input" type="time" name="end" step="300" value="${slot.end}" min="${slot.start}" max="${slot.end}">`)}</div>` : ''}
+      <label class="check"><input type="checkbox" name="rep"> Repeat every week</label>
+      <div id="bk-rep" hidden>${field('Until', `<input class="input" type="date" name="until" min="${rAdd(pre.date, 7)}" max="${esc(cal.term.end)}" value="${rAdd(pre.date, 63) > cal.term.end ? esc(cal.term.end) : rAdd(pre.date, 63)}">`,
+        `Every ${R_DAYS_LONG[rWd(pre.date)]}, up to 20 weeks. Weeks where the room is taken or blocked are skipped and listed.`)}</div>
       ${sao ? '<label class="check"><input type="checkbox" name="override"> Admin override (past the club\'s daily limit)</label>' : ''}
       <div id="bk-suggest"></div>`,
     onSubmit: async v => {
       const body = { date: pre.date, slotId: slot.id, roomId, purpose: (v.purpose || '').trim() || v.pp || '' };
       if (slot.id === 'fifth' && v.part) { body.start = v.start; body.end = v.end; }
       if (sao) { body.clubId = v.clubId; body.override = !!v.override; }
-      try { await POST('/api/bookings', body); }
+      if (v.rep && v.until) body.repeatUntil = v.until;
+      let res;
+      try { res = await POST('/api/bookings', body); }
       catch (err) {
         const sug = err.data && err.data.suggest;
         if (sug && sug.length) {
@@ -287,9 +315,19 @@ function bookDialog(cal, pre, done) {
         }
         throw err;
       }
-      toast(`Booked ${roomCode(roomId)} for ${day}`); done();
+      if (res && res.booked) {
+        // a weekly repeat: say which weeks worked and which didn't
+        if (res.skipped.length) setTimeout(() => dialog({ title: `Booked ${plural(res.booked.length, 'week')}`, submit: 'OK',
+          intro: `${esc(roomCode(roomId))} every ${R_DAYS_LONG[rWd(pre.date)]}. These weeks couldn't be booked:`,
+          body: `<ul class="list">${res.skipped.map(x => `<li><div class="grow"><b>${esc(rDay(x.date))}</b><div class="muted small">${esc(x.reason)}</div></div>
+            <a class="btn ghost sm" href="#/rooms?view=day&date=${x.date}">Pick another room</a></li>`).join('')}</ul>`, onSubmit: async () => {} }), 300);
+        else toast(`Booked ${roomCode(roomId)} for ${plural(res.booked.length, 'week')}`);
+      } else toast(`Booked ${roomCode(roomId)} for ${day}`);
+      done();
     } });
   const part = $('[name=part]', d); if (part) part.onchange = () => { $('#bk-times', d).hidden = !part.checked; };
+  const rp = $('[name=rep]', d); rp.onchange = () => { $('#bk-rep', d).hidden = !rp.checked; };
+  if (rAdd(pre.date, 7) > cal.term.end) rp.closest('label').hidden = true;   // no later week left in the term
   const club = $('[name=clubId]', d); if (club) club.onchange = () => { $('#bk-left', d).innerHTML = leftLine(club.value); };
   // a purpose button fills nothing else in; typing overrides it
   $$('[name=pp]', d).forEach(r => r.onchange = () => { $('[name=purpose]', d).value = ''; });
@@ -315,13 +353,19 @@ function bookingInfo(cal, id, done) {
         <div class="danger-zone"><button type="button" class="btn danger sm" id="bk-cancel">Cancel this booking</button></div>` : ''}`,
     onSubmit: async v => { if (!canChange) return; await POST('/api/bookings/' + b.id, { purpose: v.purpose, start: v.start, end: v.end }); toast('Saved'); done(); } });
   const c = $('#bk-cancel', d);
-  if (c) c.onclick = () => { d.close(); cancelBooking(b.id, `${room.code} on ${rDay(b.date)}`, sao && !own, done); };
+  if (c) c.onclick = () => { d.close(); cancelBooking(b.id, `${room.code} on ${rDay(b.date)}`, sao && !own, done, !!b.seriesId); };
 }
 
-function cancelBooking(id, what, askReason, done) {
+// weekly: the booking repeats, so offer "this week only" or "this and the following weeks"
+function cancelBooking(id, what, askReason, done, weekly) {
   dialog({ title: `Cancel ${what}?`, danger: true, submit: 'Cancel booking', intro: 'The room becomes free at once' + (askReason ? ' and the club is told.' : '.'),
-    body: askReason ? field('Reason <em>(the club sees it)</em>', '<input class="input" name="reason" maxlength="300">') : '',
-    onSubmit: async v => { await POST(`/api/bookings/${id}/cancel`, { reason: v.reason }); toast('Cancelled'); done(); } });
+    body: (weekly ? `<div class="bk-chips"><label class="bk-chip"><input type="radio" name="which" value="one" checked><span>Only this week</span></label>
+        <label class="bk-chip"><input type="radio" name="which" value="series"><span>This and the following weeks</span></label></div>` : '') +
+      (askReason ? field('Reason <em>(the club sees it)</em>', '<input class="input" name="reason" maxlength="300">') : ''),
+    onSubmit: async v => {
+      const r = await POST(`/api/bookings/${id}/cancel`, { reason: v.reason, series: v.which === 'series' });
+      toast(r.cancelled > 1 ? `Cancelled ${r.cancelled} weeks` : 'Cancelled'); done();
+    } });
 }
 
 // ---------- My club's bookings ----------
@@ -331,15 +375,15 @@ async function viewMyBookings() {
   const up = list.filter(b => b.active && b.date >= today), past = list.filter(b => !b.active || b.date < today).reverse();
   const row = (b, canCancel) => `<li class="${b.active ? '' : 'mb-off'}"><div class="mb-date"><b>${R_DAYS[rWd(b.date)]}</b><span>${rDMY(b.date).slice(0, 5)}</span></div>
       <div class="grow"><span class="nm">${esc(b.room)}</span> · ${esc(b.slot)} <span class="muted small">${rT12(b.start)} – ${rT12(b.end)}</span>
-        <div class="muted small">${esc(b.purpose || 'No purpose given')} · by ${esc(b.by)}${b.override ? ' · admin override' : ''}${!b.active ? ` · cancelled${b.cancelReason ? ': ' + esc(b.cancelReason) : ''}` : ''}</div></div>
-      ${canCancel ? `<button class="btn ghost sm" data-cancel="${esc(b.id)}" data-what="${esc(b.room + ' on ' + rDay(b.date))}">Cancel</button>` : ''}</li>`;
+        <div class="muted small">${esc(b.purpose || 'No purpose given')} · by ${esc(b.by)}${b.seriesId ? ' · weekly' : ''}${b.override ? ' · admin override' : ''}${!b.active ? ` · cancelled${b.cancelReason ? ': ' + esc(b.cancelReason) : ''}` : ''}</div></div>
+      ${canCancel ? `<button class="btn ghost sm" data-cancel="${esc(b.id)}" data-weekly="${b.seriesId ? 1 : 0}" data-what="${esc(b.room + ' on ' + rDay(b.date))}">Cancel</button>` : ''}</li>`;
   $('#main').innerHTML = `<a class="crumb" href="#/rooms">${svg('back', 'ic')}Rooms</a>
     <div class="page-head"><div><h1>My club's bookings</h1><p class="muted">${esc(clubName(S.user.clubId))} · cancelling frees the room at once.</p></div>
       <a class="btn key" href="#/rooms">Book a room</a></div>
     <div class="card"><div class="card-head"><h2>Coming up</h2><span class="muted small">${plural(up.length, 'booking')}</span></div>
       ${up.length ? `<ul class="list mb-list">${up.map(b => row(b, true)).join('')}</ul>` : empty('No upcoming bookings', 'Open Rooms and tap a free room to book it.')}</div>
     ${past.length ? `<div class="card"><div class="card-head"><h2>Past and cancelled</h2><span class="muted small">last 30 days</span></div><ul class="list mb-list">${past.map(b => row(b, false)).join('')}</ul></div>` : ''}`;
-  $$('[data-cancel]').forEach(b => b.onclick = () => cancelBooking(b.dataset.cancel, b.dataset.what, false, () => render()));
+  $$('[data-cancel]').forEach(b => b.onclick = () => cancelBooking(b.dataset.cancel, b.dataset.what, false, () => render(), b.dataset.weekly === '1'));
 }
 
 // ---------- the public calendar (no sign-in) ----------
@@ -447,4 +491,5 @@ async function viewRoomsAdmin(box) {
   $('#ra-addroom').onclick = () => dialog({ title: 'Add room', key: true, submit: 'Add room', body: roomForm(), onSubmit: async v => { await POST('/api/rooms', roomBody(v)); toast('Room added'); viewRoomsAdmin(box); } });
   $$('[data-room]').forEach(b => b.onclick = () => { const r = cal.rooms.find(x => x.id === b.dataset.room);
     dialog({ title: 'Edit ' + r.code, body: roomForm(r), onSubmit: async v => { await POST('/api/rooms/' + r.id, { ...roomBody(v), active: !!v.active }); toast('Saved'); viewRoomsAdmin(box); } }); });
+  if (window._openNext === 'block') { window._openNext = null; $('#ra-block').click(); }   // from the + New menu
 }

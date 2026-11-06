@@ -63,7 +63,8 @@ const PG_LOCK = TABLES.map(t => `ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`).j
   `\nREVOKE ALL ON ${TABLES.join(', ')} FROM anon, authenticated;`;
 
 // Columns added after the first version: [table, column, type]
-const ADDED = [['sp_clubs', 'logo', 'TEXT'], ['sp_clubs', 'logo_data', 'TEXT'], ['sp_clubs', 'logo_v', 'INTEGER NOT NULL DEFAULT 0']];
+const ADDED = [['sp_clubs', 'logo', 'TEXT'], ['sp_clubs', 'logo_data', 'TEXT'], ['sp_clubs', 'logo_v', 'INTEGER NOT NULL DEFAULT 0'],
+  ['sp_bookings', 'series_id', 'TEXT']];   // weekly repeats share a series id
 
 export const ensureSchema = driver => driver.transaction(async () => {
   await driver.exec(SCHEMA + (driver.dialect === 'pg' ? PG_LOCK : ''));

@@ -458,6 +458,33 @@ test('rooms: a club cancels its own booking (freeing the room at once), never an
   assert.ok((await call('GET', '/api/bookings/mine', null, A)).data.some(b => b.id === mine.id && !b.active));
 });
 
+test('rooms: weekly repeats book every week they can, list the weeks they can\'t, and cancel together', async () => {
+  const saved = clock; clock = Date.parse('2026-10-04T08:00:00Z');   // early in term, so all six weeks fit
+  try {
+  const first = nextDay(2, 1);   // a Tuesday
+  const wk = n => new Date(Date.parse(first + 'T12:00:00Z') + n * 7 * 86400000).toISOString().slice(0, 10);
+  // another club already has H13 in week 3, and SAO blocked week 4
+  assert.equal((await call('POST', '/api/bookings', { date: wk(2), slotId: 'after', roomId: room('H13') }, B)).status, 200);
+  await call('POST', '/api/blocks', { date: wk(3), roomId: room('H13'), reason: 'Exam' }, sao);
+  const r = await call('POST', '/api/bookings', { date: first, slotId: 'after', roomId: room('H13'), purpose: 'Weekly session', repeatUntil: wk(5) }, C);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.booked.map(b => b.date), [wk(0), wk(1), wk(4), wk(5)]);
+  assert.deepEqual(r.data.skipped.map(x => x.date), [wk(2), wk(3)]);
+  assert.match(r.data.skipped[0].reason, new RegExp('already booked by ' + clubs[1].name));
+  assert.match(r.data.skipped[1].reason, /blocked/);
+  // the first week has to be free, like a normal booking
+  const bad = await call('POST', '/api/bookings', { date: wk(2), slotId: 'after', roomId: room('H13'), repeatUntil: wk(5) }, C);
+  assert.equal(bad.status, 409);
+  // cancel "this and the following weeks" from week 2 on
+  const mine = (await call('GET', '/api/bookings/mine', null, C)).data.filter(b => b.seriesId === r.data.seriesId && b.active);
+  assert.equal(mine.length, r.data.booked.length);
+  const c = await call('POST', '/api/bookings/' + r.data.booked[1].id + '/cancel', { series: true }, C);
+  assert.equal(c.data.cancelled, r.data.booked.length - 1);
+  const left = (await call('GET', '/api/bookings/mine', null, C)).data.filter(b => b.seriesId === r.data.seriesId && b.active);
+  assert.deepEqual(left.map(b => b.date), [first]);
+  } finally { clock = saved; }
+});
+
 test('rooms: CSV in the sheet layout, and the security sheet gets a fresh copy after each change', async () => {
   const csv = (await call('GET', '/api/rooms/export.csv', null, sao)).data;
   const head = csv.split('\r\n')[0];

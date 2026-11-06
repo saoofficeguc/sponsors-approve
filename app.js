@@ -429,7 +429,8 @@ function renderMustChange() {
 function navItems() {
   if (S.user.role === 'sao') return [['#/', 'Dashboard', 'Home', 'home'], ['#/claims', 'All claims', 'Claims', 'list'], ['#/reviews', 'Reviews', 'Reviews', 'review', S.openReviews],
     ['#/sponsors', 'Sponsors', 'Sponsors', 'grid'], ['#/rooms', 'Rooms', 'Rooms', 'cal'], ['#/admin', 'Admin', 'Admin', 'gear', S.openAccess]];
-  return [['#/', 'My sponsors', 'Sponsors', 'home'], ['#/add', 'Add sponsor', 'Add', 'plus'], ['#/rooms', 'Rooms', 'Rooms', 'cal'], ['#/requests', 'Requests to SAO', 'Requests', 'chat']];
+  // '+' is the "New" button in the middle of the phone's bottom bar
+  return [['#/', 'Home', 'Home', 'home'], ['#/mine', 'My sponsors', 'Sponsors', 'list'], ['+', 'New', 'New', 'plus'], ['#/rooms', 'Rooms', 'Rooms', 'cal'], ['#/requests', 'Requests to SAO', 'Requests', 'chat']];
 }
 const initials = n => String(n || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
 const isDark = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
@@ -440,23 +441,28 @@ function frame() {
   const items = navItems();
   const cur = h => isOn(h) ? 'class="on" aria-current="page"' : '';
   $('#app').innerHTML = `
-    <header class="top"><div class="top-in">
+    <header class="top role-${S.user.role}"><div class="top-in">
       <a class="brand" href="#/" aria-label="SAO Portal home"><img src="assets/brand/sponsors-mark.svg" alt=""><b>SAO <span>Portal</span></b></a>
-      <nav class="nav" aria-label="Main">${items.map(([h, t, , , n]) => `<a href="${h}" ${cur(h)}>${t}${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>
+      <nav class="nav" aria-label="Main">${items.filter(([h]) => h !== '+').map(([h, t, , , n]) => `<a href="${h}" ${cur(h)}>${t}${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>
       <div class="top-tools">
+        <button class="btn key sm new-btn" id="newbtn" aria-label="New">${svg('plus', 'ic')}<span>New</span></button>
         <button class="icon-btn" id="bell" aria-label="Notifications">${svg('bell')}<span class="dot" ${S.unread ? '' : 'hidden'}>${S.unread || ''}</span></button>
         <button class="icon-btn" id="me" aria-label="Account: ${esc(S.user.name)}"><span class="avatar">${esc(initials(S.user.name))}</span></button>
       </div>
     </div></header>
     <main id="main"></main>
-    <nav class="tabbar" aria-label="Main">${items.map(([h, , short, ic, n]) => `<a href="${h}" ${isOn(h) ? 'aria-current="page"' : ''} class="${h === '#/add' ? 'add' : ''} ${isOn(h) ? 'on' : ''}">${svg(ic, 'ic')}<span>${short}</span>${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>
+    <nav class="tabbar" aria-label="Main">${items.map(([h, , short, ic, n]) => h === '+'
+      ? `<button class="tab-new" id="tabnew" aria-label="New">${svg('plus', 'ic')}<span>${short}</span></button>`
+      : `<a href="${h}" ${isOn(h) ? 'aria-current="page"' : ''} class="${isOn(h) ? 'on' : ''}">${svg(ic, 'ic')}<span>${short}</span>${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>
     <footer class="foot"><img src="assets/guc-logo.jpg" alt="German University in Cairo"><span>Student Activities Office · Times in Cairo time</span></footer>`;
   $('#bell').onclick = openNotices;
   $('#me').onclick = openAccount;
+  $('#newbtn').onclick = openNewMenu;
+  const tn = $('#tabnew'); if (tn) tn.onclick = openNewMenu;
 }
 function updateBell() { const d = $('#bell .dot'); if (d) { d.hidden = !S.unread; d.textContent = S.unread || ''; } }
 function closePop() { const p = $('.pop'); if (p) p.remove(); }
-document.addEventListener('click', e => { const p = $('.pop'); if (p && !p.contains(e.target) && !e.target.closest('#bell, #me')) p.remove(); });
+document.addEventListener('click', e => { const p = $('.pop'); if (p && !p.contains(e.target) && !e.target.closest('#bell, #me, #newbtn, #tabnew')) p.remove(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closePop(); });
 
 async function openNotices() {
@@ -492,7 +498,8 @@ function openAccount() {
 
 // ---------- routing ----------
 const ROUTES = [
-  [/^#?\/?$/, () => S.user.role === 'sao' ? viewDashboard() : viewMyClub()],
+  [/^#?\/?$/, () => S.user.role === 'sao' ? viewDashboard() : viewHome()],
+  [/^#\/mine$/, () => viewMyClub(), 'rep'],
   [/^#\/add$/, () => viewAdd()],
   [/^#\/claim\/([^/]+)$/, m => viewClaim(m[1])],
   [/^#\/requests$/, () => viewRequests()],
@@ -609,11 +616,11 @@ async function viewMyClub() {
     ${soon.map(c => `<div class="banner warn" role="alert">${svg('warn')}<div><b>${esc(c.sponsor)}: ${esc(left(c.expiresAt))}</b>
       Log the first contact before ${dateTime(c.expiresAt)} or the sponsor is released. <a href="#/claim/${esc(c.id)}">Update it</a></div></div>`).join('')}
     <div class="kpis">
-      <a class="kpi ${full ? 'alert' : ''}" href="#/?status=active"><b>${all.length}<small class="of"> / ${max}</small></b><span>Active</span></a>
-      <a class="kpi" href="#/?status=reserved"><b>${n('reserved')}</b><span>Reserved</span></a>
-      <a class="kpi" href="#/?status=negotiation"><b>${n('contacted') + n('negotiation')}</b><span>In progress</span></a>
-      <a class="kpi" href="#/?status=confirmed"><b>${n('confirmed')}</b><span>Confirmed</span></a>
-      ${n('pending_review') ? `<a class="kpi" href="#/?status=pending_review"><b>${n('pending_review')}</b><span>Waiting for SAO review</span></a>` : ''}
+      <a class="kpi ${full ? 'alert' : ''}" href="#/mine?status=active"><b>${all.length}<small class="of"> / ${max}</small></b><span>Active</span></a>
+      <a class="kpi" href="#/mine?status=reserved"><b>${n('reserved')}</b><span>Reserved</span></a>
+      <a class="kpi" href="#/mine?status=negotiation"><b>${n('contacted') + n('negotiation')}</b><span>In progress</span></a>
+      <a class="kpi" href="#/mine?status=confirmed"><b>${n('confirmed')}</b><span>Confirmed</span></a>
+      ${n('pending_review') ? `<a class="kpi" href="#/mine?status=pending_review"><b>${n('pending_review')}</b><span>Waiting for SAO review</span></a>` : ''}
     </div>
     <div class="card flush" id="claims"></div>`;
   filteredClaims($('#claims'));
@@ -624,11 +631,11 @@ async function viewAdd() {
   const held = (await GET('/api/claims?status=active')).length, max = S.settings.maxActive;
   const main = $('#main');
   main.innerHTML = `
-    <div class="narrow"><a class="crumb" href="#/">${svg('back', 'ic')}My sponsors</a>
+    <div class="narrow"><a class="crumb" href="#/mine">${svg('back', 'ic')}My sponsors</a>
     <div class="page-head"><div><h1>Add sponsor</h1>
       <p class="muted">Type the name to check the registry. A free sponsor is held for your club for ${S.reserveDays} days. Your club holds ${held} of ${max}.</p></div></div>
     ${held >= max ? `<div class="banner warn" role="alert">${svg('lock')}<div><b>Your club already holds ${max} sponsors — the limit.</b>
-      Close one on <a href="#/">My sponsors</a> (Rejected or Released) before adding another. You can still search the registry below.</div></div>` : ''}
+      Close one on <a href="#/mine">My sponsors</a> (Rejected or Released) before adding another. You can still search the registry below.</div></div>` : ''}
       <form class="card stack" id="add" novalidate>
         <div id="picked" hidden></div>
         <div class="suggest-wrap">${field('Sponsor name', '<input class="input" name="name" required maxlength="100" autocomplete="off" aria-describedby="name-err" aria-controls="sugs">')}
@@ -776,7 +783,7 @@ async function viewClaim(id) {
         `<li><div class="grow"><a href="#/claim/${esc(h.id)}" class="nm">${esc(h.club)}</a><div class="muted small">${date(h.createdAt)}${h.closeReason ? ' · ' + esc(h.closeReason) : ''}</div></div>${chip(h.status)}</li>`).join('')}</ul></div>` : ''}` : '';
 
   $('#main').innerHTML = `
-    <a class="crumb" href="${sao ? '#/claims' : '#/'}">${svg('back', 'ic')}${sao ? 'All claims' : 'My sponsors'}</a>
+    <a class="crumb" href="${sao ? '#/claims' : '#/mine'}">${svg('back', 'ic')}${sao ? 'All claims' : 'My sponsors'}</a>
     <div class="page-head"><div><div class="row" style="margin-bottom:6px">${chip(c.status)}<span class="tag">${esc(c.category)}</span></div>
       <h1>${esc(c.sponsor)}</h1>${c.instagram ? `<p class="muted">${igLink(c.instagram)}</p>` : ''}</div></div>
     ${banner}
@@ -801,7 +808,7 @@ async function viewClaim(id) {
   $('#del-claim').onclick = () => confirmDelete({ title: `Delete ${c.sponsor}?`, url: `/api/claims/${c.id}/delete`,
     text: sao ? 'The claim, its notes and its history are erased. If no other club ever had this sponsor, the sponsor record goes too.'
       : 'It is removed from your club\'s list with its notes and history, for everyone including SAO, and the sponsor becomes free for other clubs.',
-    done: () => { location.hash = sao ? '#/claims' : '#/'; } });
+    done: () => { location.hash = sao ? '#/claims' : '#/mine'; } });
   $('#note').onsubmit = async e => {
     e.preventDefault(); const t = e.target.text.value.trim(); if (!t) return;
     try { await POST(`/api/claims/${c.id}/note`, { text: t }); render(); } catch (err) { toast(err.message, true); }
@@ -868,6 +875,7 @@ async function viewDashboard() {
             <div class="small">${esc(e.text || label(e.to_status))}</div><div class="muted small">${ago(e.at)} · ${esc(e.by)}</div></div></li>`).join('')}</ul>` : empty('Nothing yet')}</div>
       </div>
       <div class="col">
+        <div class="card" id="dash-rooms">${loader(40)}</div>
         <div class="card"><div class="card-head"><h2>Ending soon</h2><a class="small" href="#/claims?status=expiring">See all</a></div>
           ${d.expiring.length ? `<ul class="list">${d.expiring.map(c => `<li><div class="grow"><a href="#/claim/${esc(c.id)}" class="nm">${esc(c.sponsor)}</a>
             <div class="muted small">${esc(c.club)}</div></div><span class="due soon">${esc(left(c.expiresAt))}</span></li>`).join('')}</ul>` : empty('No reservation ends in the next 3 days')}</div>
@@ -876,6 +884,7 @@ async function viewDashboard() {
             <div class="muted small">${esc(c.club)} · last activity ${date(c.lastActivityAt)}</div></div>${chip(c.status)}</li>`).join('')}</ul>` : empty('Nothing stalled')}</div>
       </div>
     </div>`;
+  fillDashRooms($('#dash-rooms'));   // home.js
 }
 
 async function viewAllClaims() {
@@ -1065,6 +1074,7 @@ async function viewAdmin(tab) {
     };
     $('#add').onclick = () => wire(dialog({ title: 'Add account', key: true, submit: 'Add account', body: form(),
       onSubmit: async v => { if (!v.password) delete v.password; await POST('/api/users', v); toast('Account added'); render(); } }));
+    if (window._openNext === 'add-account') { window._openNext = null; $('#add').click(); }   // from the + New menu
     $$('[data-access]').forEach(card => {
       const a = open.find(x => x.id === card.dataset.access);
       $('[data-approve]', card).onclick = () => dialog({ title: `Approve ${a.name}?`, key: true, submit: 'Approve',
