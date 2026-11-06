@@ -10,7 +10,11 @@ let clock = Date.parse('2026-11-05T10:00:00Z');
 const DAY = 86400000;
 const app = createApp({ driver: sqliteDriver(':memory:'), now: () => clock });
 
+// Every new sponsor needs its Instagram profile link. Tests that are about something else get one made from the
+// sponsor's name (same name -> same link); tests about Instagram itself pass their own.
+const autoIg = name => 'https://www.instagram.com/' + (String(name).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30) || 'x' + [...String(name)].reduce((h, c) => (h * 31 + c.codePointAt(0)) % 1e9, 7));
 async function call(method, path, body, token) {
+  if (method === 'POST' && path === '/api/claims' && body && !body.sponsorId && !('instagram' in body)) body = { ...body, instagram: autoIg(body.name) };
   const r = await app.handle(new Request('http://x' + path, {
     method, headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
     body: body ? JSON.stringify(body) : undefined,
@@ -54,7 +58,7 @@ test('Club A reserves Brand X; Club B is blocked and the owner stays hidden', as
 });
 
 test('different capitalization or the same Instagram handle is the same conflict', async () => {
-  for (const body of [{ name: 'BRAND-x.', categoryId: cats.Other }, { name: 'Totally Other Name', categoryId: cats.Other, instagram: '@BrandX.EG' }]) {
+  for (const body of [{ name: 'BRAND-x.', categoryId: cats.Other }, { name: 'Totally Other Name', categoryId: cats.Other, instagram: 'https://instagram.com/BrandX.EG?igsh=abc' }]) {
     const r = await call('POST', '/api/claims', body, B);
     assert.equal(r.status, 409, JSON.stringify(r.data)); assert.equal(r.data.error, 'This sponsor is currently unavailable.');
   }
@@ -325,6 +329,26 @@ test('first time signing in with an unknown email sends an access request to SAO
   assert.equal(again.state, 'unknown'); assert.equal(again.declined.reason, 'Not a member');
   // an email that already has an account cannot send a request
   assert.equal((await call('POST', '/api/first-time/request', { email: 'a@club.test', name: 'Imposter', clubId: club.id })).status, 409);
+});
+
+test('a new sponsor needs its Instagram profile link; the same account can never be added twice', async () => {
+  const add = (instagram, name = 'Link Rule Co') => call('POST', '/api/claims', { name, categoryId: cats.Other, instagram }, B);
+  for (const [ig, why] of [['', 'missing'], ['@linkruleco', 'just the @name'], ['linkruleco', 'bare name'], ['https://www.instagram.com/p/Cabc/', 'a post'],
+    ['https://www.instagram.com/stories/linkruleco/', 'a story'], ['https://example.com/linkruleco', 'another website']]) {
+    const r = await add(ig);
+    assert.equal(r.status, 400, why); assert.equal(r.data.field, 'instagram', why);
+  }
+  assert.equal((await add('https://www.instagram.com/linkruleco/')).data.result, 'reserved');
+  // another club: a different name with the same account, in any link form, is blocked
+  for (const ig of ['https://instagram.com/LinkRuleCo', 'instagram.com/linkruleco?igsh=xyz', 'https://m.instagram.com/linkruleco/']) {
+    const r = await call('POST', '/api/claims', { name: 'Different Name Entirely', categoryId: cats.Other, instagram: ig }, C);
+    assert.equal(r.status, 409, ig); assert.equal(r.data.error, 'This sponsor is currently unavailable.');
+  }
+  // the same name with another account is blocked too, because a club holds that name
+  assert.equal((await call('POST', '/api/claims', { name: 'Link Rule Co', categoryId: cats.Other, instagram: 'https://www.instagram.com/linkrule_egypt' }, C)).status, 409);
+  // choosing an existing sponsor from the suggestions needs no link
+  const free = (await call('GET', '/api/sponsors/search?q=Starbright', null, C)).data.find(s => s.available);
+  if (free) assert.notEqual((await call('POST', '/api/claims', { sponsorId: free.id }, C)).status, 400);
 });
 
 test('the logo update fills missing logos only, and keeps an uploaded one', async () => {

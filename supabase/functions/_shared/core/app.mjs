@@ -418,7 +418,7 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
       if (!normName(name)) fail(400, 'The sponsor name needs letters or numbers.');
       categoryId = need(body.categoryId, 'Category');
       if (!(await one('SELECT id FROM sp_categories WHERE id = $1 AND active = 1', [categoryId]))) fail(400, 'Choose a category from the list.');
-      const ig = parseInstagram(body.instagram);
+      const ig = parseInstagram(body.instagram, { linkOnly: true, required: true });   // every new sponsor has its Instagram account, so no one can add it twice
       if (ig.error) fail(400, ig.error, { field: 'instagram' });
       handle = ig.handle;
     }
@@ -427,6 +427,12 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     let target = picked, conflict = null;
     if (!picked) {
       const { byName, byIg } = await findExact(name, handle);
+      // If the name or the Instagram account belongs to a sponsor a club already holds, that settles it
+      for (const s of [byName, byIg]) {
+        const holder = s && await activeClaimOn(s.id);
+        if (holder && holder.club_id === user.club_id) return new Reply(409, { error: 'Your club already has this sponsor.', code: 'own', claimId: holder.id });
+        if (holder) { await audit(user, 'claim.blocked', `sponsor:${s.id}`, null, { name, club: club.name }); return new Reply(409, { error: UNAVAILABLE, code: 'unavailable', sponsorId: s.id }); }
+      }
       if (byName && byIg && byName.id !== byIg.id) conflict = [{ id: byName.id, name: byName.name, reason: 'Same name' }, { id: byIg.id, name: byIg.name, reason: 'Same Instagram account' }];
       else if (byName && handle && byName.ig_handle && byName.ig_handle !== handle) conflict = [{ id: byName.id, name: byName.name, reason: 'Same name, different Instagram account' }];
       else target = byName || byIg;
@@ -780,7 +786,7 @@ export function createApp({ driver, now = () => Date.now(), allowSetup = true, s
     if (!n) fail(400, 'The sponsor name needs letters or numbers.');
     const categoryId = need(body.categoryId, 'Category');
     if (!(await one('SELECT id FROM sp_categories WHERE id = $1', [categoryId]))) fail(400, 'Choose a category.');
-    const ig = parseInstagram(body.instagram); if (ig.error) fail(400, ig.error);
+    const ig = parseInstagram(body.instagram, { linkOnly: true }); if (ig.error) fail(400, ig.error);
     const aliasNames = [...new Set((Array.isArray(body.aliases) ? body.aliases : []).map(a => str(a, 100)).filter(a => normName(a) && normName(a) !== n))].slice(0, 20);
     const clash = await one(`SELECT name FROM sp_aliases WHERE norm_name = $1 AND sponsor_id <> $2`, [n, s.id]);
     if (clash) fail(409, `"${name}" is already another name of a different sponsor.`);

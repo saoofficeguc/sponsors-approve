@@ -13,7 +13,10 @@ const ok = msg => console.log('  ok   ' + msg);
 const slow = [];
 const seen = new Map();   // rep email -> every response body they received (for the privacy check)
 
+// every new sponsor needs its Instagram profile link: make one from the name unless the test passes its own
+const autoIg = name => 'https://www.instagram.com/' + (String(name).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30) || 'x' + [...String(name)].reduce((h, c) => (h * 31 + c.codePointAt(0)) % 1e9, 7));
 async function call(method, path, body, who) {
+  if (method === 'POST' && path === '/api/claims' && body && !body.sponsorId && !('instagram' in body) && typeof body.name === 'string') body = { ...body, instagram: autoIg(body.name) };
   const t0 = Date.now();
   const r = await fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json', ...(who?.token ? { Authorization: 'Bearer ' + who.token } : {}) },
     body: body ? JSON.stringify(body) : undefined });
@@ -77,7 +80,7 @@ const LOOKALIKES = ['Coca Cola Egypt', 'Starbuck', 'Samsung Electronics', 'Noon 
       // look the name up first, like the page does while typing
       await call('GET', '/api/sponsors/search?q=' + encodeURIComponent(name.slice(0, 4)), null, rp);
       const body = { name, categoryId: cats[(i + k) % cats.length].id, notes: `Contact via ${['email', 'LinkedIn', 'a friend', 'their booth'][k % 4]}` };
-      if (k % 3 === 0) body.instagram = '@' + name.toLowerCase().replace(/[^a-z0-9]/g, '') + 'eg';
+      if (k % 3 === 0) body.instagram = 'https://www.instagram.com/' + name.toLowerCase().replace(/[^a-z0-9]/g, '') + '/';
       const x = await call('POST', '/api/claims', body, rp);
       if (x.status === 200) results[x.data.result]++;
       else if (x.data.code) results[x.data.code] = (results[x.data.code] || 0) + 1;
@@ -95,18 +98,20 @@ const LOOKALIKES = ['Coca Cola Egypt', 'Starbuck', 'Samsung Electronics', 'Noon 
   }
   ok('look-alikes: ' + notes.splice(0).map(n => n.split(': ')[1]).reduce((a, k) => (a[k] = (a[k] || 0) + 1, a), {}) && 'done');
   const ig = [
-    ['IG same handle, different name', { name: 'Totally Different Co', instagram: '@lunarlabs_test' }],
+    ['IG same account, different name', { name: 'Totally Different Co', instagram: 'https://instagram.com/LunarLabs_Test' }],
+    ['IG only the @name', { name: 'Handle Only Co', instagram: '@handleonlyco' }],
+    ['IG missing', { name: 'No Instagram Co', instagram: '' }],
     ['IG post link', { name: 'Post Link Co', instagram: 'https://www.instagram.com/p/Cxyz123/' }],
-    ['IG with spaces', { name: 'Space Handle Co', instagram: '@bad handle' }],
+    ['IG with spaces', { name: 'Space Handle Co', instagram: 'https://instagram.com/bad handle' }],
     ['IG website instead', { name: 'Website Co', instagram: 'www.example.com' }],
     ['IG profile link with query', { name: 'Query Link Co', instagram: 'https://instagram.com/QueryLinkCo?igsh=abc' }],
   ];
   // give Lunar Labs an Instagram first via SAO edit, then test the duplicate handle
   const lunar = (await call('GET', '/api/sponsors', null, sao)).data.find(s => s.name === 'Lunar Labs');
-  await call('POST', '/api/sponsors/' + lunar.id, { name: 'Lunar Labs', categoryId: lunar.categoryId, instagram: '@lunarlabs_test', aliases: [] }, sao);
+  await call('POST', '/api/sponsors/' + lunar.id, { name: 'Lunar Labs', categoryId: lunar.categoryId, instagram: 'https://www.instagram.com/lunarlabs_test', aliases: [] }, sao);
   for (const [label, b] of ig) {
     const x = await call('POST', '/api/claims', { ...b, categoryId: catId('Other') }, reps[16]);
-    const want = { 'IG same handle, different name': 409, 'IG post link': 400, 'IG with spaces': 400, 'IG website instead': 400, 'IG profile link with query': 200 }[label];
+    const want = { 'IG same account, different name': 409, 'IG only the @name': 400, 'IG missing': 400, 'IG post link': 400, 'IG with spaces': 400, 'IG website instead': 400, 'IG profile link with query': 200 }[label];
     x.status === want ? ok(`${label}: ${x.status} ${x.data.error || x.data.result}`) : bug('instagram', `${label}: expected ${want}, got ${x.status}`, x.data);
   }
 

@@ -90,6 +90,11 @@ const label = st => (S && S.statuses && S.statuses[st]) || st;
 const chip = st => `<span class="chip ${esc(st)}">${svg(st)}${esc(label(st))}</span>`;
 const availChip = s => s.mine ? `<span class="chip mine">${svg('confirmed')}Your club</span>`
   : s.available ? `<span class="chip avail">${svg('confirmed')}Available</span>` : `<span class="chip unavail">${svg('lock')}Unavailable</span>`;
+// Instagram profile links (the server checks again)
+const igLinkOk = v => /^(https?:\/\/)?(www\.|m\.)?(instagram\.com|instagr\.am)\/(?!(p|reel|reels|stories|explore|accounts|tv|s|share)(\/|$))[A-Za-z0-9._]{1,30}\/?(\?.*)?$/i.test(v);
+const igLinkProblem = v => /^@|^[A-Za-z0-9._]+$/.test(v) ? 'Paste the full profile link, like https://www.instagram.com/brandname — not just the @name.'
+  : /instagram\.com\/(p|reel|reels|stories|tv|s|share)\//i.test(v) ? 'That is a post or story link. Open the sponsor\'s profile page and copy that link instead.'
+  : 'Paste an Instagram profile link, like https://www.instagram.com/brandname';
 const igLink = h => h ? `<a href="https://www.instagram.com/${encodeURIComponent(h)}/" target="_blank" rel="noopener noreferrer">@${esc(h)}</a>` : '';
 function deadline(c) {
   if (c.status === 'reserved' && c.expiresAt) {
@@ -561,8 +566,9 @@ async function viewAdd() {
           <p class="err" id="name-err"></p><div class="suggest" id="sugs" aria-live="polite"></div></div>
         <div id="newbits" class="stack">
           ${field('Category', `<select class="input" name="categoryId" required>${opts(S.categories, '', 'Choose a category')}</select>`)}
-          <label class="field"><span>Instagram <em>(optional)</em></span><input class="input" name="instagram" placeholder="@handle or instagram.com/…" autocomplete="off" aria-describedby="ig-hint ig-err">
-            <div class="hint" id="ig-hint">Paste the sponsor's profile link or @handle. <a id="ig-search" href="#" target="_blank" rel="noopener noreferrer">Search Instagram for this name</a></div>
+          <label class="field"><span>Instagram profile link</span><input class="input" name="instagram" type="url" inputmode="url" required placeholder="https://www.instagram.com/brandname" autocomplete="off" aria-describedby="ig-hint ig-err">
+            <div class="hint" id="ig-hint">Open the sponsor's Instagram profile and copy the link (on the phone: ⋯ → Copy profile URL). It makes sure no other club adds the same sponsor.
+              <a id="ig-search" href="#" target="_blank" rel="noopener noreferrer">Find it on Instagram</a></div>
             <p class="err" id="ig-err"></p></label>
         </div>
         ${field('Notes <em>(optional)</em>', '<textarea class="input" name="notes" maxlength="1000" placeholder="Contact person, plans, anything useful for your club"></textarea>', 'Only your club and SAO see notes.')}
@@ -594,7 +600,7 @@ async function viewAdd() {
   form.name.addEventListener('input', search);
   form.instagram.addEventListener('input', () => {
     const v = form.instagram.value.trim(); const err = $('#ig-err');
-    err.textContent = !v || /^@?[A-Za-z0-9._]{1,30}$/.test(v) || /instagram\.com\/[A-Za-z0-9._]+/i.test(v) || /instagr\.am\//i.test(v) ? '' : 'Use the @handle or the profile link (instagram.com/…).';
+    err.textContent = !v || igLinkOk(v) ? '' : igLinkProblem(v);
     form.instagram.setAttribute('aria-invalid', err.textContent ? 'true' : 'false');
   });
   updateIgLink();
@@ -604,6 +610,7 @@ async function viewAdd() {
     $('#name-err').textContent = ''; $('#ig-err').textContent = ''; $('#result').innerHTML = '';
     if (!picked && !v.name.trim()) { $('#name-err').textContent = 'Enter the sponsor name.'; form.name.focus(); return; }
     if (!picked && !v.categoryId) { $('#result').innerHTML = '<p class="err">Choose a category.</p>'; form.categoryId.focus(); return; }
+    if (!picked && !igLinkOk(v.instagram.trim())) { $('#ig-err').textContent = v.instagram.trim() ? igLinkProblem(v.instagram.trim()) : 'The Instagram profile link is required.'; form.instagram.focus(); return; }
     const btn = $('#go'); btn.disabled = true;
     try {
       const r = await POST('/api/claims', picked ? { sponsorId: picked.id, notes: v.notes } : v);
@@ -920,7 +927,7 @@ async function viewSponsor(id) {
           <div class="form-grid">
             ${field('Name', `<input class="input" name="name" value="${esc(s.name)}" required maxlength="100">`)}
             ${field('Category', `<select class="input" name="categoryId">${opts(S.categories, s.categoryId)}</select>`)}
-            <div class="wide">${field('Instagram', `<input class="input" name="instagram" value="${s.instagram ? '@' + esc(s.instagram) : ''}" placeholder="@handle">`)}</div>
+            <div class="wide">${field('Instagram profile link', `<input class="input" name="instagram" type="url" value="${s.instagram ? 'https://www.instagram.com/' + esc(s.instagram) : ''}" placeholder="https://www.instagram.com/brandname">`)}</div>
             <div class="wide">${field('Other names', `<textarea class="input" name="aliases" placeholder="One per line">${esc(s.aliases.join('\n'))}</textarea>`, 'Spellings that mean the same sponsor. Clubs typing any of these are blocked the same way.')}</div>
           </div>
           <p class="err" role="alert"></p><div class="row"><button class="btn key">Save changes</button></div></form>

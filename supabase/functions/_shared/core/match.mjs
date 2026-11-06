@@ -53,17 +53,21 @@ export function possibleMatch(a, b) {
   return null;
 }
 
-// Instagram: accepts "@name", "name" or a profile link. Returns { handle } or { error }.
-const NOT_PROFILES = new Set(['p', 'reel', 'reels', 'stories', 'explore', 'accounts', 'tv', 'direct', 'about', 'developer', 'legal']);
-export function parseInstagram(input) {
+// Instagram: a profile link (instagram.com/name), or with { linkOnly: false } also "@name" / "name".
+// Returns { handle } or { error }. The handle is what makes two sponsors the same account.
+const NOT_PROFILES = new Set(['p', 'reel', 'reels', 'stories', 'explore', 'accounts', 'tv', 'direct', 'about', 'developer', 'legal', 's', 'share']);
+export const IG_LINK_HELP = 'Paste the sponsor\'s Instagram profile link, like https://www.instagram.com/brandname';
+export function parseInstagram(input, { linkOnly = false, required = false } = {}) {
   let s = String(input || '').trim();
-  if (!s) return { handle: null };
+  if (!s) return required ? { error: 'The sponsor\'s Instagram link is required. ' + IG_LINK_HELP + '.' } : { handle: null };
   if (/^(https?:\/\/)?(www\.|m\.)?(instagram\.com|instagr\.am)(\/|$)/i.test(s)) {
     let url;
     try { url = new URL(/^https?:/i.test(s) ? s : 'https://' + s); } catch { return { error: 'This Instagram link is not valid.' }; }
     const first = url.pathname.split('/').filter(Boolean)[0] || '';
-    if (!first || NOT_PROFILES.has(first.toLowerCase())) return { error: 'Paste the link to the sponsor\'s profile page, not a post or reel.' };
+    if (!first || NOT_PROFILES.has(first.toLowerCase())) return { error: 'Paste the link to the sponsor\'s profile page, not a post, reel or story.' };
     s = first;
+  } else if (linkOnly) {
+    return { error: IG_LINK_HELP + ' (not just the @name).' };
   } else if (/^https?:\/\//i.test(s) || s.includes('/') || /^(www\.)|\.(com|net|org)(\.eg)?$/i.test(s)) {
     return { error: 'Use an Instagram profile link (instagram.com/...) or the @handle.' };
   }

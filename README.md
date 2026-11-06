@@ -32,7 +32,8 @@ npm test
 | 14-day reservation | Ends at the same Cairo clock time 14 calendar days later. Logging the first-contact date stops the clock. Reminders 3 days and 1 day before. |
 | Automatic expiry | Checked on every request and every hour (GitHub Actions). History is never deleted. |
 | Privacy | Other clubs only see "This sponsor is currently unavailable." Nothing in any club page, search or error names the owning club. |
-| Exact match | Same name ignoring case, spaces, punctuation and accents; a registered other name; or the same Instagram account → blocked. |
+| Exact match | Same name ignoring case, spaces, punctuation and accents; a registered other name; or the same Instagram account → blocked. If either the name or the Instagram account belongs to a sponsor a club holds, it is "unavailable". |
+| Instagram link | Required when a club adds a new sponsor: the profile link (https://www.instagram.com/name), not just the @name, a post or a story. Any form of the same account counts as the same sponsor. |
 | Possible match | A typo, an added "Egypt"/"Group", or one name inside another → held as *Pending SAO Review*. It blocks other clubs while SAO decides. |
 | Access | Club reps only ever receive their own club's records; SAO pages and data are refused on the server for anyone else. |
 
@@ -41,7 +42,7 @@ Statuses: Reserved → Contacted → In Negotiation → Confirmed, or Rejected (
 ## Who can do what
 
 **Club Representative** — My sponsors (own list, filters, deadlines), Add sponsor (live suggestions showing
-Available / Unavailable, category, optional Instagram with link check), update status and first-contact date, notes,
+Available / Unavailable, category, required Instagram profile link), update status and first-contact date, notes,
 history, and *Ask SAO to review* for an unavailable sponsor. In-site notifications.
 **Delete** (bin icon on the list, or on the sponsor's page) erases the club's sponsor completely — its notes, history
 and log entries, for everyone including SAO — and frees the sponsor for other clubs. A club can only delete its own.
