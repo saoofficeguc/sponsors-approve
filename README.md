@@ -94,13 +94,15 @@ Built from *Club Room Booking Platform — Requirements (6 Nov 2026)*; it replac
 ### Security Google Sheet
 
 Every booking, cancellation and block is copied to a Google Sheet within seconds (and the sheet refreshes itself every
-5 minutes), as neat read-only tabs: **Today**, **Next 7 days**, and grids for **After hours** and **Fifth slot** from this
-week to the end of term (today in yellow, blocked in grey, admin overrides in pink). Setup, once, in Admin > Rooms:
+5 minutes). It has two easy-to-read tabs, each with a black title band, a yellow date band and a colour key:
+**Today** (or the next booking day): only the rooms in use, After hours and Fifth slot side by side;
+**This week**: the next 4 booking days, two columns per day. After hours is blue, Fifth slot yellow, blocked rooms grey with the reason.
+Setup, once, in Admin > Rooms:
 
 1. Create a new Google Sheet. 2. Extensions › Apps Script: paste the script from **Copy the script** (it has the site's
 address and the sheet key filled in) and save. 3. Run **setup** once and allow access. 4. Deploy › New deployment › Web app,
 Execute as *Me*, access *Anyone*; copy the Web app URL. 5. Paste it in the site and press **Save and sync**.
-Share the sheet with security as *Viewer*. The script template is `assets/sheet/security-sheet.gs.txt`.
+Share the sheet with security as *Viewer*. The script template is `assets/sheet/security-sheet.gs.txt`; the whole term is in the CSV export.
 
 ## Put it online (free: GitHub Pages + Supabase)
 

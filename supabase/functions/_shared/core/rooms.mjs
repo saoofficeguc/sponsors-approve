@@ -340,74 +340,84 @@ export function registerRooms(x) {
     return s;
   }
 
-  // Ready-to-write tabs: values plus colours, so the Apps Script in the sheet only has to paste them
+  // The security sheet, ready to paste: two easy tabs (Today, This week), only rooms in use, a colour per slot.
+  // Each tab: title band, date band, a short note, column headings (1 or 2 rows), rows with their own colours, a key.
   async function buildSheet() {
     const t = await term(), today = localDate(now());
     const rooms = await q('SELECT * FROM sp_rooms WHERE active = 1 ORDER BY sort');
-    const slots = await slotsAll(), slotName = Object.fromEntries(slots.map(s => [s.id, s.name]));
+    const slots = await slotsAll();   // After hours first
     const clubs = Object.fromEntries((await q('SELECT id, name FROM sp_clubs')).map(c => [c.id, c.name]));
-    const code = Object.fromEntries((await q('SELECT id, code FROM sp_rooms')).map(r => [r.id, r.code]));
-    const from = t.start < today ? t.start : today, to = t.end > addDays(today, 7) ? t.end : addDays(today, 7);
-    const all = await q('SELECT * FROM sp_bookings WHERE active = 1 AND date >= $1 AND date <= $2', [from, to]);
-    const blocks = await q('SELECT * FROM sp_blocks WHERE date >= $1 AND date <= $2', [from, to]);
-    const blockOf = (d, roomId, slotId) => blocks.find(k => k.date === d && (!k.room_id || k.room_id === roomId) && (!k.slot_id || k.slot_id === slotId));
-    const C = { head: '#121212', headFc: '#FFFFFF', booked: '#E7EEF8', bookedFc: '#1F3B63', override: '#FDE3E4', blocked: '#ECECE6', blockedFc: '#5C5C5C',
-      today: '#FFF4B3', past: '#9A9A94', white: '#FFFFFF', ink: '#121212' };
-    const updated = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(now()));
-    const startOf = b => b.start_time || (slots.find(s => s.id === b.slot_id) || {}).start;
-    const endOf = b => b.end_time || (slots.find(s => s.id === b.slot_id) || {}).end;
+    // the booking days to show: today (or the next booking day), then the following ones
+    const days = [];
+    for (let d = today; days.length < 4 && d <= addDays(today, 30); d = addDays(d, 1))
+      if (d >= t.start && d <= t.end && t.weekdays.includes(weekday(d))) days.push(d);
+    const last = days[days.length - 1] || today;
+    const all = await q('SELECT * FROM sp_bookings WHERE active = 1 AND date >= $1 AND date <= $2', [today, last]);
+    const blocks = await q('SELECT * FROM sp_blocks WHERE date >= $1 AND date <= $2', [today, last]);
+    const C = { white: '#FFFFFF', band: '#F7F7F3', ink: '#121212', faint: '#B5B5AE', after: '#DCE7F7', afterFc: '#123A6B', fifth: '#FFF1A8', fifthFc: '#121212',
+      blocked: '#E6E6E0', blockedFc: '#5C5C5C' };
+    const LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const longDay = d => `${LONG[weekday(d)]} ${ddmmyyyy(d)}`;
+    const updated = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(now()));
+    const note = `Updated ${updated} · booked on the SAO Portal`;
+    const short = x => { const [h, m] = x.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')}`; };   // 16:00 -> 4:00
+    const legend = [['After hours', C.after, C.afterFc], ['Fifth slot', C.fifth, C.fifthFc], ['Blocked', C.blocked, C.blockedFc]];
+    // what one room shows in one slot on one day
+    const cell = (d, room, slot, compact) => {
+      if (!allows(room, slot.id)) return { v: '—', bg: null, fc: C.faint, b: false, used: false };
+      const bk = all.find(x => x.date === d && x.room_id === room.id && x.slot_id === slot.id);
+      if (bk) {
+        const custom = slot.id === 'fifth' && (bk.start_time !== slot.start || bk.end_time !== slot.end);
+        return { v: (clubs[bk.club_id] || 'A club') + (custom ? (compact ? `\n${short(bk.start_time)}–${short(bk.end_time)}` : `\n${t12(bk.start_time)} – ${t12(bk.end_time)}`) : ''), bg: slot.id === 'after' ? C.after : C.fifth,
+          fc: slot.id === 'after' ? C.afterFc : C.fifthFc, b: true, used: true };
+      }
+      const k = blocks.find(x => x.date === d && (!x.room_id || x.room_id === room.id) && (!x.slot_id || x.slot_id === slot.id));
+      if (k) return { v: 'Blocked' + (k.reason ? `\n${k.reason}` : ''), bg: C.blocked, fc: C.blockedFc, b: false, used: true };
+      return { v: 'Free', bg: null, fc: C.faint, b: false, used: false };
+    };
+    const slotHead = sl => `${sl.name}\n${t12(sl.start)} – ${t12(sl.end)}`;
 
-    // list of bookings (and blocks) for some days, sorted by day, time and room
-    const listTab = (name, title, days) => {
-      const rows = [], bg = [], fc = [];
-      for (const d of days) {
-        const items = all.filter(b => b.date === d).map(b => ({ d, time: `${t12(startOf(b))} – ${t12(endOf(b))}`, sortT: startOf(b), slot: slotName[b.slot_id] || b.slot_id,
-          room: code[b.room_id] || '', club: clubs[b.club_id] || '', purpose: b.purpose || '', note: Number(b.override) ? 'Admin override' : '', kind: Number(b.override) ? 'override' : 'booked' }));
-        for (const k of blocks.filter(k => k.date === d))
-          items.push({ d, time: k.slot_id ? `${t12((slots.find(s => s.id === k.slot_id) || {}).start || '00:00')} – ${t12((slots.find(s => s.id === k.slot_id) || {}).end || '23:59')}` : 'All day',
-            sortT: k.slot_id ? (slots.find(s => s.id === k.slot_id) || {}).start : '00:00', slot: k.slot_id ? slotName[k.slot_id] : 'Both', room: k.room_id ? code[k.room_id] : 'All rooms',
-            club: 'BLOCKED', purpose: k.reason || '', note: '', kind: 'blocked' });
-        items.sort((a, b) => a.sortT.localeCompare(b.sortT) || a.room.localeCompare(b.room, 'en', { numeric: true }));
-        for (const it of items) {
-          rows.push([dayLabel(d), it.time, it.slot, it.room, it.club, it.purpose, it.note]);
-          const back = it.kind === 'blocked' ? C.blocked : it.kind === 'override' ? C.override : d === today ? C.today : C.white;
-          bg.push(Array(7).fill(back)); fc.push(Array(7).fill(it.kind === 'blocked' ? C.blockedFc : C.ink));
-        }
+    // ---- Today (or the next booking day): rooms in use, the two slots side by side ----
+    const day = days[0];
+    const todayTab = (() => {
+      const rows = [], bg = [], fc = [], bold = [];
+      if (day) {
+        const used = rooms.filter(r => slots.some(sl => cell(day, r, sl).used));
+        used.forEach((r, i) => {
+          const cs = slots.map(sl => cell(day, r, sl)), base = i % 2 ? C.band : C.white;
+          rows.push([r.code, ...cs.map(x => x.v)]); bg.push([base, ...cs.map(x => x.bg || base)]); fc.push([C.ink, ...cs.map(x => x.fc)]); bold.push([true, ...cs.map(x => x.b)]);
+        });
       }
-      if (!rows.length) { rows.push(['No room bookings', '', '', '', '', '', '']); bg.push(Array(7).fill(C.white)); fc.push(Array(7).fill(C.past)); }
-      return { name, title, subtitle: `Updated ${updated} (Cairo time) · from the SAO booking site — do not edit, changes are overwritten`,
-        header: ['Day', 'Time', 'Slot', 'Room', 'Club', 'Purpose / reason', 'Note'], rows, bg, fc, widths: [130, 150, 100, 90, 190, 260, 120], freezeCols: 1 };
-    };
-    // term grid: a row per teaching day, a column per room of that slot type
-    const gridTab = (name, title, slotId) => {
-      // from the start of this week (security doesn't need past weeks; the CSV export has the whole term)
-      const weekStart = addDays(today, -weekday(today));
-      const cols = rooms.filter(r => allows(r, slotId)), days = termDays(t).filter(d => d >= weekStart);
-      const rows = [], bg = [], fc = [];
-      for (const d of days) {
-        const row = [dayLabel(d)], rbg = [d === today ? C.today : C.white], rfc = [d < today ? C.past : C.ink];
-        for (const r of cols) {
-          const b = all.find(x => x.date === d && x.slot_id === slotId && x.room_id === r.id), k = !b && blockOf(d, r.id, slotId);
-          if (b) {
-            const custom = slotId === 'fifth' && (b.start_time !== (slots.find(s => s.id === 'fifth') || {}).start || b.end_time !== (slots.find(s => s.id === 'fifth') || {}).end);
-            row.push((clubs[b.club_id] || '') + (custom ? ` ${t12(b.start_time)}–${t12(b.end_time)}` : ''));
-            rbg.push(Number(b.override) ? C.override : d === today ? C.today : C.booked); rfc.push(d < today ? C.past : C.bookedFc);
-          } else if (k) { row.push('Blocked'); rbg.push(C.blocked); rfc.push(C.blockedFc); }
-          else { row.push(''); rbg.push(d === today ? C.today : C.white); rfc.push(C.ink); }
-        }
-        rows.push(row); bg.push(rbg); fc.push(rfc);
-      }
-      const s = slots.find(x => x.id === slotId) || {};
-      if (!rows.length) { rows.push(['The term has ended', ...cols.map(() => '')]); bg.push(Array(cols.length + 1).fill(C.white)); fc.push(Array(cols.length + 1).fill(C.past)); }
-      return { name, title, subtitle: `${s.start ? t12(s.start) + ' – ' + t12(s.end) + ' · ' : ''}This week to ${ddmmyyyy(t.end)} · updated ${updated} · today in yellow, blocked in grey, admin overrides in pink`,
-        header: ['Day', ...cols.map(r => r.code)], rows, bg, fc, widths: [130, ...cols.map(() => slotId === 'fifth' ? 120 : 140)], freezeCols: 1 };
-    };
-    const week = []; for (let i = 0; i < 7; i++) week.push(addDays(today, i));
-    return {
-      generatedAt: now(),
-      tabs: [listTab('Today', `Room bookings — today, ${dayLabel(today)}`, [today]), listTab('Next 7 days', 'Room bookings — next 7 days', week),
-        gridTab('After hours', 'After hours — rest of term', 'after'), gridTab('Fifth slot', 'Fifth slot — rest of term', 'fifth')],
-    };
+      const empty = !rows.length;
+      if (empty) { rows.push([day ? 'No rooms are booked' : 'No booking days coming up', ...slots.map(() => '')]); bg.push(Array(slots.length + 1).fill(C.white)); fc.push(Array(slots.length + 1).fill(C.faint)); bold.push(Array(slots.length + 1).fill(false)); }
+      const count = empty ? 0 : rows.length;
+      return { name: 'Today', title: 'SAO Portal · Room bookings',
+        date: day ? (day === today ? `Today · ${longDay(day)}` : `Next booking day · ${longDay(day)}`) : 'No booking days in the next month',
+        note: (day ? `${count} room${count === 1 ? '' : 's'} in use, all others free · ` : '') + note,
+        header: [['Room', ...slots.map(slotHead)]], merges: [], rows, bg, fc, bold,
+        widths: [120, ...slots.map(() => 260)], align: ['left', ...slots.map(() => 'center')], freezeCols: 1, legend };
+    })();
+
+    // ---- This week: the next booking days, two columns per day ----
+    const weekTab = (() => {
+      const head1 = ['Room'], head2 = [''], merges = [];
+      days.forEach((d, i) => { head1.push(longDay(d).replace(/ (\d\d)\/(\d\d)\/\d{4}$/, ' $1/$2'), ...slots.slice(1).map(() => '')); head2.push(...slots.map(sl => sl.name));
+        merges.push([0, 1 + i * slots.length, 1, slots.length]); });
+      merges.push([0, 0, 2, 1]);
+      const rows = [], bg = [], fc = [], bold = [];
+      const used = rooms.filter(r => days.some(d => slots.some(sl => cell(d, r, sl).used)));
+      used.forEach((r, i) => {
+        const base = i % 2 ? C.band : C.white, cs = days.flatMap(d => slots.map(sl => cell(d, r, sl, true)));
+        rows.push([r.code, ...cs.map(x => x.v === 'Free' ? '' : x.v)]); bg.push([base, ...cs.map(x => x.bg || base)]); fc.push([C.ink, ...cs.map(x => x.fc)]); bold.push([true, ...cs.map(x => x.b)]);
+      });
+      if (!rows.length) { rows.push(['No rooms are booked', ...Array(days.length * slots.length).fill('')]); bg.push(Array(head1.length).fill(C.white)); fc.push(Array(head1.length).fill(C.faint)); bold.push(Array(head1.length).fill(false)); }
+      return { name: 'This week', title: 'SAO Portal · Room bookings',
+        date: days.length ? `${longDay(days[0])} – ${longDay(days[days.length - 1])}` : 'No booking days in the next month',
+        note: 'Empty cells are free · ' + note, header: [head1, head2], merges, rows, bg, fc, bold,
+        widths: [110, ...days.flatMap(() => slots.map(() => 150))], align: ['left', ...days.flatMap(() => slots.map(() => 'center'))], freezeCols: 1, legend };
+    })();
+
+    return { v: 2, generatedAt: now(), tabs: [todayTab, weekTab] };
   }
 
   // Send the sheet a fresh copy (after every change, and from the "Sync now" button)

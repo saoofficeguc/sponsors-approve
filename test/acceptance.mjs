@@ -473,21 +473,33 @@ test('rooms: CSV in the sheet layout, and the security sheet gets a fresh copy a
   const sy = await call('POST', '/api/rooms-sheet/sync', {}, sao);
   assert.equal(sy.data.ok, true, JSON.stringify(sy));
   assert.equal(got[0].secret, set.sheetSecret);
-  assert.deepEqual(got[0].tabs.map(t => t.name), ['Today', 'Next 7 days', 'After hours', 'Fifth slot']);
-  const grid = got[0].tabs.find(t => t.name === 'After hours');
-  const monRow = grid.rows.find(r => r[0].endsWith(asDMY(MON)));
-  assert.equal(monRow[grid.header.indexOf('C5.101')], clubs[1].name);
-  assert.equal(monRow[grid.header.indexOf('C5.102')], 'Blocked');
-  assert.equal(grid.rows.length, grid.bg.length);
-  // a booking updates the sheet by itself
-  got.length = 0;
-  await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room('H10') }, B);
-  await Promise.all(pending.splice(0));
-  assert.equal(got.length, 1);
-  assert.ok(got[0].tabs[3].rows.some(r => r.includes(clubs[1].name)));
+  // two easy tabs, each with a title, a date line, a key, and rows that match their colours
+  assert.deepEqual(got[0].tabs.map(t => t.name), ['Today', 'This week']);
+  for (const tab of got[0].tabs) {
+    assert.ok(tab.title && tab.date && tab.note && tab.legend.length === 3);
+    assert.equal(tab.rows.length, tab.bg.length); assert.equal(tab.rows.length, tab.bold.length);
+    assert.ok(tab.rows.every(r => r.length === tab.header[0].length));
+  }
+  const week = got[0].tabs[1];
+  assert.equal(week.header.length, 2);   // day names over "After hours" / "Fifth slot"
+  assert.deepEqual(week.header[1].slice(1, 3), ['After hours', 'Fifth slot']);
+  // a booking today updates the sheet by itself, and Today lists only rooms in use (After hours first)
+  const day = today(), wd = new Date(day + 'T12:00:00Z').getUTCDay();
+  if ([0, 1, 2, 3].includes(wd)) {
+    got.length = 0;
+    assert.equal((await call('POST', '/api/bookings', { date: day, slotId: 'after', roomId: room('H13') }, B)).status, 200);
+    await Promise.all(pending.splice(0));
+    assert.equal(got.length, 1);
+    const t0 = got[0].tabs[0];
+    assert.match(t0.date, /^Today · /);
+    assert.deepEqual(t0.header[0].map(h => h.split('\n')[0]), ['Room', 'After hours', 'Fifth slot']);
+    const row = t0.rows.find(r => r[0] === 'H13');
+    assert.equal(row[1], clubs[1].name);
+    assert.ok(t0.rows.every(r => r.slice(1).some(v => v !== 'Free' && v !== '—')), 'only rooms in use');
+  }
   // the sheet can fetch its copy with the key, and only with it
   assert.equal((await call('GET', '/api/rooms-sheet/data?secret=wrong')).status, 403);
-  assert.equal((await call('GET', '/api/rooms-sheet/data?secret=' + set.sheetSecret)).data.tabs.length, 4);
+  assert.equal((await call('GET', '/api/rooms-sheet/data?secret=' + set.sheetSecret)).data.tabs.length, 2);
   srv.close();
 });
 

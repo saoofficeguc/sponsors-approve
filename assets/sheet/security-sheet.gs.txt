@@ -1,7 +1,7 @@
 /**
  * SAO room bookings -> this Google Sheet (for security).
  * The SAO booking site sends a fresh copy after every booking, cancellation or block,
- * and this sheet also fetches one every 5 minutes. Don't edit the tabs: they are rewritten each time.
+ * and this sheet also fetches one every 5 minutes. Two tabs: Today and This week. Don't edit them: they are rewritten each time.
  *
  * Setup (once): Admin > Rooms > Security sheet on the site walks you through it.
  *   1. Paste this whole script here (Extensions > Apps Script), replacing what is there, and save.
@@ -49,44 +49,70 @@ function write(data) {
   lock.waitLock(30000);
   try {
     const ss = SpreadsheetApp.getActive();
+    const names = data.tabs.map(function (t) { return t.name; });
     data.tabs.forEach(function (tab, i) { writeTab(ss, tab, i); });
-    // drop the empty "Sheet1" a new spreadsheet starts with
-    const first = ss.getSheetByName('Sheet1');
-    if (first && ss.getSheets().length > 1 && first.getLastRow() === 0) ss.deleteSheet(first);
+    // remove tabs from older versions of the sheet and the empty "Sheet1" a new spreadsheet starts with
+    ss.getSheets().forEach(function (sh) {
+      if (names.indexOf(sh.getName()) < 0 && ss.getSheets().length > names.length) ss.deleteSheet(sh);
+    });
+    ss.setActiveSheet(ss.getSheetByName(names[0]));
   } finally {
     lock.releaseLock();
   }
 }
 
+// One tab: black title band, yellow date band, a short note, the column headings, the rows, then a colour key
 function writeTab(ss, tab, index) {
   const sh = ss.getSheetByName(tab.name) || ss.insertSheet(tab.name, index);
-  const cols = tab.header.length, rows = tab.rows.length;
+  const cols = tab.rows[0].length, heads = tab.header.length, rows = tab.rows.length;
+  const top = 5, body = top + heads, total = body + rows + 2;
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
   sh.clear();
-  fitSize(sh, rows + 4, cols);
-  // title, small "updated" line, a thin yellow brand line, then the column headings
-  sh.getRange(1, 1).setValue(tab.title).setFontSize(15).setFontWeight('bold').setFontColor('#121212');
-  sh.getRange(2, 1).setValue(tab.subtitle).setFontSize(9).setFontColor('#5C5C5C');
-  sh.getRange(3, 1, 1, cols).setBackground('#FFD500');
-  sh.setRowHeight(1, 32); sh.setRowHeight(3, 4);
-  sh.getRange(4, 1, 1, cols).setNumberFormat('@').setValues([tab.header])
-    .setBackground('#121212').setFontColor('#FFFFFF').setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
-  sh.setRowHeight(4, 30);
-  if (rows) {
-    const body = sh.getRange(5, 1, rows, cols);
-    body.setNumberFormat('@').setValues(tab.rows).setBackgrounds(tab.bg).setFontColors(tab.fc)
-      .setVerticalAlignment('middle').setWrap(true).setFontSize(10);
-    if (cols > 1) sh.getRange(5, 2, rows, cols - 1).setHorizontalAlignment(tab.name.indexOf('days') >= 0 || tab.name === 'Today' ? 'left' : 'center');
-    sh.getRange(5, 1, rows, 1).setFontWeight('bold');
-    sh.getRange(4, 1, rows + 1, cols).setBorder(true, true, true, true, true, true, '#E4E4DF', SpreadsheetApp.BorderStyle.SOLID);
-    sh.setRowHeights(5, rows, 26);
-  }
-  sh.setFrozenRows(4);
-  sh.setFrozenColumns(tab.freezeCols || 0);
+  fitSize(sh, total, cols);
+  sh.setHiddenGridlines(true);
+  const all = sh.getRange(1, 1, total, cols);
+  all.setFontFamily('Arial').setVerticalAlignment('middle').setNumberFormat('@');
+
+  // 1 title, 2 date, 3 note, 4 gap
+  sh.getRange(1, 1, 1, cols).merge().setValue(tab.title).setBackground('#121212').setFontColor('#FFFFFF')
+    .setFontSize(16).setFontWeight('bold').setHorizontalAlignment('left');
+  sh.getRange(2, 1, 1, cols).merge().setValue(tab.date).setBackground('#FFD500').setFontColor('#121212')
+    .setFontSize(14).setFontWeight('bold').setHorizontalAlignment('left');
+  sh.getRange(3, 1, 1, cols).merge().setValue(tab.note).setFontColor('#5C5C5C').setFontSize(10);
+  sh.setRowHeight(1, 46); sh.setRowHeight(2, 36); sh.setRowHeight(3, 26); sh.setRowHeight(4, 8);
+  sh.getRange(1, 1).setValue('   ' + tab.title); sh.getRange(2, 1).setValue('   ' + tab.date); sh.getRange(3, 1).setValue('   ' + tab.note);
+
+  // column headings
+  const h = sh.getRange(top, 1, heads, cols);
+  h.setValues(tab.header).setBackground('#2B2B2B').setFontColor('#FFFFFF').setFontWeight('bold').setFontSize(11)
+    .setHorizontalAlignment('center').setWrap(true);
+  (tab.merges || []).forEach(function (m) { sh.getRange(top + m[0], 1 + m[1], m[2], m[3]).merge(); });
+  for (let r = 0; r < heads; r++) sh.setRowHeight(top + r, heads > 1 ? 28 : 40);
+
+  // the rooms
+  const b = sh.getRange(body, 1, rows, cols);
+  b.setValues(tab.rows).setBackgrounds(tab.bg).setFontColors(tab.fc).setFontSize(12).setWrap(true)
+    .setFontWeights(tab.bold.map(function (r) { return r.map(function (x) { return x ? 'bold' : 'normal'; }); }));
+  tab.align.forEach(function (a, c) { sh.getRange(body, c + 1, rows, 1).setHorizontalAlignment(a); });
+  sh.getRange(body, 1, rows, 1).setFontSize(13);
+  sh.setRowHeights(body, rows, 38);
+  sh.getRange(top, 1, heads + rows, cols).setBorder(true, true, true, true, true, true, '#E4E4DF', SpreadsheetApp.BorderStyle.SOLID);
+
+  // colour key under the table
+  const keyRow = body + rows + 1;
+  sh.setRowHeight(keyRow - 1, 14); sh.setRowHeight(keyRow, 28);
+  (tab.legend || []).forEach(function (k, i) {
+    if (i + 1 > cols) return;
+    sh.getRange(keyRow, i + 1).setValue(k[0]).setBackground(k[1]).setFontColor(k[2]).setFontSize(10).setFontWeight('bold').setHorizontalAlignment('center');
+  });
+
   tab.widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
-  sh.setTabColor(index === 0 ? '#FFD500' : index === 1 ? '#E31E24' : '#121212');
+  sh.setFrozenRows(top + heads - 1);
+  sh.setFrozenColumns(tab.freezeCols || 0);
+  sh.setTabColor(index === 0 ? '#FFD500' : '#121212');
   // warn anyone who tries to type in it (the site overwrites it anyway)
   if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length)
-    sh.protect().setDescription('Written by the SAO booking site').setWarningOnly(true);
+    sh.protect().setDescription('Written by the SAO Portal').setWarningOnly(true);
 }
 
 function fitSize(sh, rows, cols) {
