@@ -21,11 +21,13 @@ const FIFTH_ROOMS = [...Array.from({ length: 12 }, (_, i) => `C5.1${String(i + 1
   ...Array.from({ length: 12 }, (_, i) => `C5.2${String(i + 1).padStart(2, '0')}`), 'H10', 'H12', 'H13'];
 
 export async function seedRooms(db) {
+  await roomsV2(db);
   if ((await db.meta('rooms_v1')) === '1') return;
   if (!(await db.one('SELECT id FROM sp_clubs LIMIT 1'))) return;   // not set up yet; setup runs this again
   if (!(await db.one('SELECT id FROM sp_slots LIMIT 1'))) {
-    await db.q(`INSERT INTO sp_slots (id, name, start_time, end_time, max_per_day, sort) VALUES ('fifth', 'Fifth slot', '15:45', '18:30', 5, 0)`);
-    await db.q(`INSERT INTO sp_slots (id, name, start_time, end_time, max_per_day, sort) VALUES ('after', 'After hours', '18:30', '21:30', 2, 1)`);
+    // After hours is listed first (sort 0), the fifth slot under it
+    await db.q(`INSERT INTO sp_slots (id, name, start_time, end_time, max_per_day, sort) VALUES ('after', 'After hours', '17:30', '20:00', 2, 0)`);
+    await db.q(`INSERT INTO sp_slots (id, name, start_time, end_time, max_per_day, sort) VALUES ('fifth', 'Fifth slot', '15:15', '17:30', 5, 1)`);
   }
   if (!(await db.one('SELECT id FROM sp_rooms LIMIT 1'))) {
     const codes = [...new Set([...AFTER_HOURS_ROOMS, ...FIFTH_ROOMS])].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
@@ -38,6 +40,24 @@ export async function seedRooms(db) {
     await db.meta('term_start', '2026-09-13'); await db.meta('term_end', '2026-12-31'); await db.meta('weekdays', '0,1,2,3');
   }
   await db.meta('rooms_v1', '1');
+  await db.meta('rooms_v2', '1');
+}
+
+// Once, on sites made with the first placeholder times: After hours first, and the confirmed times
+// (after hours 17:30–20:00, fifth slot 15:15–17:30). Times SAO already changed are left alone.
+async function roomsV2(db) {
+  if ((await db.meta('rooms_v2')) === '1' || (await db.meta('rooms_v1')) !== '1') return;
+  await db.q(`UPDATE sp_slots SET sort = 0 WHERE id = 'after'`);
+  await db.q(`UPDATE sp_slots SET sort = 1 WHERE id = 'fifth'`);
+  await db.q(`UPDATE sp_slots SET start_time = '17:30', end_time = '20:00' WHERE id = 'after' AND start_time = '18:30' AND end_time = '21:30'`);
+  await db.q(`UPDATE sp_slots SET start_time = '15:15', end_time = '17:30' WHERE id = 'fifth' AND start_time = '15:45' AND end_time = '18:30'`);
+  // bookings for the whole old fifth slot become the whole new one; others are kept inside the new times
+  await db.q(`UPDATE sp_bookings SET start_time = '15:15', end_time = '17:30' WHERE slot_id = 'fifth' AND start_time = '15:45' AND end_time = '18:30'`);
+  await db.q(`UPDATE sp_bookings SET end_time = '17:30' WHERE slot_id = 'fifth' AND end_time > '17:30'`);
+  await db.q(`UPDATE sp_bookings SET start_time = '15:15' WHERE slot_id = 'fifth' AND start_time < '15:15'`);
+  await db.q(`UPDATE sp_bookings SET start_time = '15:15' WHERE slot_id = 'fifth' AND start_time >= end_time`);
+  await db.q(`UPDATE sp_bookings SET start_time = '17:30', end_time = '20:00' WHERE slot_id = 'after'`);
+  await db.meta('rooms_v2', '1');
 }
 
 export function registerRooms(x) {

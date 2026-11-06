@@ -32,7 +32,7 @@ async function viewRooms(main, opts = {}) {
   let cal = null, lastJson = '';
 
   const range = () => {
-    if (st.view === 'day') return [st.date, st.date];
+    if (st.view === 'day') { const s0 = rAdd(st.date, -rWd(st.date)); return [s0, rAdd(s0, 13)]; }   // two weeks, for the day buttons
     if (st.view === 'week') { const s = rAdd(st.date, -rWd(st.date)); return [s, rAdd(s, 6)]; }
     const first = st.date.slice(0, 8) + '01';
     const last = rAdd(new Date(Date.UTC(+st.date.slice(0, 4), +st.date.slice(5, 7), 0, 12)).toISOString().slice(0, 10), 0);
@@ -73,7 +73,7 @@ async function viewRooms(main, opts = {}) {
   const used = (d, slotId) => cal.bookings.filter(b => b.date === d && b.slotId === slotId && b.clubId === myClub).length;
   const quota = d => cal.slots.map(s => `${s.name}: <strong>${Math.max(0, s.maxPerDay - used(d, s.id))} of ${s.maxPerDay}</strong> left`).join(' · ');
   const canBook = (d, slotId) => (rep || sao) && teaching(d) && d >= cal.today && (sao || used(d, slotId) < slotById(slotId).maxPerDay);
-  const slotsShown = () => cal.slots.filter(s => !st.slot || s.id === st.slot).sort((a, b) => a.start.localeCompare(b.start));
+  const slotsShown = () => cal.slots.filter(s => !st.slot || s.id === st.slot);
 
   // one cell's state
   function cellState(d, room, slotId) {
@@ -95,21 +95,26 @@ async function viewRooms(main, opts = {}) {
   // ---- the three views ----
   function dayView() {
     const d = st.date;
-    if (!teaching(d)) return `<div class="card">${empty('No room bookings on this day', d < cal.term.start || d > cal.term.end ? `The term runs ${rDMY(cal.term.start)} – ${rDMY(cal.term.end)}.` : `Rooms are booked on ${cal.term.weekdays.map(w => R_DAYS[w]).join(', ')}.`)}</div>`;
+    if (!teaching(d)) return `<div class="card">${empty('No room bookings on this day', d < cal.term.start || d > cal.term.end ? `The term runs ${rDMY(cal.term.start)} – ${rDMY(cal.term.end)}.` : `Rooms are booked on ${cal.term.weekdays.map(w => R_DAYS[w]).join(', ')}. Pick another day above.`)}</div>`;
     return slotsShown().map(s => {
-      const rows = roomsFor(s.id).map(r => ({ r, x: cellState(d, r, s.id) })).filter(({ x }) => passesFilters(x));
-      const free = roomsFor(s.id).filter(r => cellState(d, r, s.id).kind === 'free').length;
-      return `<section class="card flush rd-slot"><div class="card-head" style="padding-bottom:12px"><div><h2>${esc(s.name)}</h2>
-          <div class="muted small">${rT12(s.start)} – ${rT12(s.end)} · ${free} of ${roomsFor(s.id).length} free</div></div>
-          ${rep ? `<span class="tag">${Math.max(0, s.maxPerDay - used(d, s.id))} of ${s.maxPerDay} left for your club</span>` : ''}</div>
-        <ul class="rd-list">${rows.length ? rows.map(({ r, x }) => `<li class="rd-row k-${x.kind}">
-          <div class="rd-room"><b>${esc(r.code)}</b>${r.capacity ? `<span class="muted small">${r.capacity} seats</span>` : ''}</div>
-          <div class="rd-what">${x.b ? `${clubChip(x.b)}<div class="muted small">${[s.id === 'fifth' && (x.b.start !== s.start || x.b.end !== s.end) ? rT12(x.b.start) + ' – ' + rT12(x.b.end) : '', esc(x.b.purpose || '')].filter(Boolean).join(' · ')}</div>`
-            : x.k ? `<span class="rs rs-blocked">${svg('lock')}Blocked</span><div class="muted small">${esc(x.k.reason)}</div>`
-            : x.kind === 'free' ? '<span class="rs rs-free">Free</span>' : '<span class="muted small">—</span>'}</div>
-          <div class="rd-act">${x.kind === 'free' && canBook(d, s.id) ? `<button class="btn key sm" data-book="${esc(r.id)}" data-slot="${s.id}" data-date="${d}">Book</button>`
-            : x.b ? `<button class="btn ghost sm" data-info="${esc(x.b.id)}">Details</button>` : ''}</div></li>`).join('')
-          : `<li class="rd-row">${empty('Nothing matches the filters')}</li>`}</ul></section>`;
+      const all = roomsFor(s.id), boxes = all.map(r => ({ r, x: cellState(d, r, s.id) })).filter(({ x }) => passesFilters(x));
+      const free = all.filter(r => cellState(d, r, s.id).kind === 'free').length;
+      const left = rep ? Math.max(0, s.maxPerDay - used(d, s.id)) : null;
+      const custom = b => s.id === 'fifth' && (b.start !== s.start || b.end !== s.end) ? rT12(b.start) + ' – ' + rT12(b.end) : '';
+      const box = ({ r, x }) => {
+        if (x.b) return `<button class="rt k-${x.kind}" data-info="${esc(x.b.id)}"><span class="rt-code">${esc(r.code)}</span>
+          <span class="rt-club">${logo(clubById(x.b.clubId), 22)}<span>${esc(x.kind === 'mine' ? 'Your club' : clubById(x.b.clubId).name)}</span></span>
+          <span class="rt-sub">${esc([custom(x.b), x.b.purpose].filter(Boolean).join(' · ') || (x.kind === 'mine' ? clubById(x.b.clubId).name : 'Booked'))}</span></button>`;
+        if (x.k) return `<div class="rt k-blocked" title="${esc(x.k.reason)}"><span class="rt-code">${esc(r.code)}</span><span class="rt-state">${svg('lock')}Blocked</span><span class="rt-sub">${esc(x.k.reason)}</span></div>`;
+        if (x.kind === 'free' && canBook(d, s.id)) return `<button class="rt k-free can" data-book="${esc(r.id)}" data-slot="${s.id}" data-date="${d}">
+          <span class="rt-code">${esc(r.code)}</span><span class="rt-state">Free</span><span class="rt-cta">Tap to book</span></button>`;
+        if (x.kind === 'free') return `<div class="rt k-free"><span class="rt-code">${esc(r.code)}</span><span class="rt-state">Free</span>${r.capacity ? `<span class="rt-sub">${r.capacity} seats</span>` : ''}</div>`;
+        return `<div class="rt k-${x.kind}"><span class="rt-code">${esc(r.code)}</span><span class="rt-sub">${x.kind === 'past' ? 'Past' : '—'}</span></div>`;
+      };
+      return `<section class="rt-slot rt-${s.id}"><div class="rt-head">
+          <div><h2>${esc(s.name)}</h2><div class="muted small">${rT12(s.start)} – ${rT12(s.end)} · <b class="rt-free-n">${free} of ${all.length} free</b></div></div>
+          ${left !== null ? `<span class="rt-quota ${left ? '' : 'none'}">${left ? `${left} of ${s.maxPerDay} left for your club` : `Your club has used all ${s.maxPerDay}`}</span>` : ''}</div>
+        <div class="rt-grid">${boxes.length ? boxes.map(box).join('') : `<p class="muted small">Nothing matches the filters.</p>`}</div></section>`;
     }).join('');
   }
 
@@ -157,6 +162,18 @@ async function viewRooms(main, opts = {}) {
     if (st.view === 'week') { const s0 = rAdd(st.date, -rWd(st.date)); const days = cal.term.weekdays.map(w => rAdd(s0, w)).sort(); return `Week of ${rDMY(days[0] || s0)}`; }
     return `${R_MONTHS[+st.date.slice(5, 7) - 1]} ${st.date.slice(0, 4)}`;
   }
+  // this week's and next week's teaching days as big buttons
+  function dateStrip() {
+    const s0 = rAdd(st.date, -rWd(st.date));
+    const days = [];
+    for (let w = 0; w < 2; w++) for (const wd of cal.term.weekdays.slice().sort((a, b) => a - b)) days.push(rAdd(s0, w * 7 + wd));
+    return `<div class="ds" role="tablist" aria-label="Days">${days.map(d => {
+      const mine = myClub ? cal.bookings.filter(b => b.date === d && b.clubId === myClub).length : 0;
+      const on = st.view === 'day' && d === st.date;
+      return `<button class="ds-day ${on ? 'on' : ''} ${d === cal.today ? 'today' : ''} ${d < cal.today ? 'past' : ''}" data-day="${d}" role="tab" aria-selected="${on}">
+        <span>${R_DAYS[rWd(d)]}</span><b>${+d.slice(8, 10)}</b><small>${R_MONTHS[+d.slice(5, 7) - 1].slice(0, 3)}</small>${mine ? `<i title="Your club's bookings">${mine}</i>` : ''}</button>`;
+    }).join('')}</div>`;
+  }
   function draw() {
     const buildings = [...new Set(cal.rooms.map(r => r.building).filter(Boolean))].sort();
     const legend = `<div class="r-legend"><span class="rs rs-free">Free</span><span class="rs rs-booked">Booked</span>${myClub ? '<span class="rs rs-mine">Your club</span>' : ''}<span class="rs rs-blocked">${svg('lock')}Blocked</span></div>`;
@@ -168,6 +185,8 @@ async function viewRooms(main, opts = {}) {
         <div class="r-nav"><button class="icon-act" id="prev" aria-label="Previous">${svg('back')}</button>
           <button class="btn ghost sm" id="today">Today</button>
           <button class="icon-act r-next" id="next" aria-label="Next">${svg('back')}</button>
+          <label class="btn ghost sm r-pick" title="Pick a date">${svg('cal', 'ic')}<span>Pick a date</span>
+            <input type="date" id="pickdate" value="${esc(st.date)}" min="${esc(cal.term.start)}" max="${esc(cal.term.end)}" aria-label="Pick a date"></label>
           <h2 class="r-title">${esc(title())}</h2></div>
         <div class="r-views" role="tablist">${['day', 'week', 'month'].map(v => `<button class="${st.view === v ? 'on' : ''}" data-view="${v}" role="tab" aria-selected="${st.view === v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div>
         <form class="r-filters" id="rf">
@@ -177,7 +196,7 @@ async function viewRooms(main, opts = {}) {
           <label class="check small"><input type="checkbox" name="free" ${st.free ? 'checked' : ''}> Only free</label>
         </form>
       </div>
-      ${rep && st.view === 'day' && teaching(st.date) ? `<div class="banner ok r-quota">${svg('info')}<div><b>Your club on ${esc(rDay(st.date))}</b>${quota(st.date)}</div></div>` : ''}
+      ${st.view !== 'month' ? dateStrip() : ''}
       ${legend}
       <div id="r-body">${st.view === 'day' ? dayView() : st.view === 'week' ? weekView() : monthView()}</div>
       <p class="muted small" style="margin-top:12px">Updates by itself every few seconds.</p>`;
@@ -201,6 +220,10 @@ async function viewRooms(main, opts = {}) {
   function wire() {
     $('#prev').onclick = () => go(-1); $('#next').onclick = () => go(1);
     $('#today').onclick = () => { st.date = cal.today; refreshView(); };
+    const pick = $('#pickdate');
+    pick.onchange = () => { if (rIsDate(pick.value)) { st.date = pick.value; st.view = 'day'; refreshView(); } };
+    $('.r-pick').onclick = e => { if (e.target === pick) return; e.preventDefault(); try { pick.showPicker(); } catch (x) { pick.focus(); pick.click(); } };
+    $$('[data-day]').forEach(b => b.onclick = () => { st.date = b.dataset.day; st.view = 'day'; refreshView(); });
     $$('[data-view]').forEach(b => b.onclick = () => { st.view = b.dataset.view; refreshView(); });
     $('#rf').onchange = () => { const f = new FormData($('#rf')); st.slot = f.get('slot') || ''; st.building = f.get('building') || ''; st.club = f.get('club') || ''; st.free = !!f.get('free'); keepUrl(); draw(); };
     $$('[data-goto]').forEach(b => b.onclick = () => { st.date = b.dataset.goto; st.view = phone || st.view === 'week' ? 'day' : 'week'; refreshView(); });
@@ -227,44 +250,49 @@ async function viewRooms(main, opts = {}) {
 function bookDialog(cal, pre, done) {
   const me = S.user, sao = me.role === 'sao';
   const slot = cal.slots.find(s => s.id === pre.slotId);
-  const freeRooms = slotId => cal.rooms.filter(r => r.active !== false && (slotId === 'after' ? r.afterHours : r.fifth))
-    .filter(r => !cal.bookings.some(b => b.date === pre.date && b.roomId === r.id && b.slotId === slotId)
-      && !cal.blocks.some(k => k.date === pre.date && (!k.roomId || k.roomId === r.id) && (!k.slotId || k.slotId === slotId)));
-  const usedBy = (clubId, slotId) => cal.bookings.filter(b => b.date === pre.date && b.slotId === slotId && b.clubId === clubId).length;
-  const left = (clubId, slotId) => { const s = cal.slots.find(x => x.id === slotId); return Math.max(0, s.maxPerDay - usedBy(clubId, slotId)); };
-  const d = dialog({ title: `Book a room — ${rDay(pre.date)}`, key: true, submit: 'Confirm booking',
-    intro: sao ? 'Booking as SAO. Choose the club; tick override to go past its daily limit.' : `For <b>${esc(clubName(me.clubId))}</b>. ${cal.slots.map(s => `${esc(s.name)}: ${left(me.clubId, s.id)} of ${s.maxPerDay} left`).join(' · ')}`,
-    body: `${sao ? field('Club', `<select class="input" name="clubId" required>${opts(cal.clubs.filter(c => c.active), '', 'Choose a club')}</select>`) : ''}
-      ${field('Slot', `<select class="input" name="slotId">${cal.slots.map(s => `<option value="${s.id}" ${s.id === pre.slotId ? 'selected' : ''}>${esc(s.name)} (${rT12(s.start)} – ${rT12(s.end)})</option>`).join('')}</select>`)}
-      ${field('Room', '<select class="input" name="roomId"></select>')}
-      <div id="bk-times" class="form-grid">${field('From', '<input class="input" type="time" name="start" step="300">')}${field('To', '<input class="input" type="time" name="end" step="300">')}</div>
-      ${field('Purpose <em>(optional)</em>', `<input class="input" name="purpose" maxlength="200" list="bk-purposes" placeholder="Session, meeting, workshop…"><datalist id="bk-purposes"><option>Session</option><option>Meeting</option><option>Workshop</option><option>Rehearsal</option><option>Training</option></datalist>`)}
-      ${sao ? '<label class="check"><input type="checkbox" name="override"> Admin override (book past the club\'s daily limit)</label>' : ''}
+  let roomId = pre.roomId;
+  const roomCode = id => (cal.rooms.find(r => r.id === id) || {}).code || '';
+  const used = clubId => cal.bookings.filter(b => b.date === pre.date && b.slotId === slot.id && b.clubId === clubId).length;
+  const leftLine = clubId => { const l = Math.max(0, slot.maxPerDay - used(clubId));
+    return clubId ? `${l} of ${slot.maxPerDay} ${esc(slot.name.toLowerCase())} rooms left for ${clubId === me.clubId ? 'your club' : esc(clubName(clubId))} that day${l ? '' : sao ? ' — tick override to book anyway' : ''}` : ''; };
+  const day = `${R_DAYS_LONG[rWd(pre.date)]} ${rDMY(pre.date)}`;
+  const purposes = ['Session', 'Meeting', 'Workshop', 'Training', 'Rehearsal'];
+  const d = dialog({ title: `Book ${roomCode(roomId)}`, key: true, submit: 'Book it',
+    body: `<div class="bk-summary">
+        <div><span class="label">Day</span><b>${esc(day)}</b></div>
+        <div><span class="label">${esc(slot.name)}</span><b>${rT12(slot.start)} – ${rT12(slot.end)}</b></div>
+        <div><span class="label">Room</span><b id="bk-room">${esc(roomCode(roomId))}</b></div></div>
+      ${sao ? field('For which club?', `<select class="input" name="clubId" required>${opts(cal.clubs.filter(c => c.active), '', 'Choose a club')}</select>`) : ''}
+      <p class="bk-left" id="bk-left">${sao ? '' : leftLine(me.clubId)}</p>
+      <div class="field"><span>What is it for? <em>(optional)</em></span>
+        <div class="bk-chips">${purposes.map(p => `<label class="bk-chip"><input type="radio" name="pp" value="${p}"><span>${p}</span></label>`).join('')}</div>
+        <input class="input" name="purpose" maxlength="200" placeholder="…or write it here" style="margin-top:8px"></div>
+      ${slot.id === 'fifth' ? `<label class="check"><input type="checkbox" name="part"> Only part of the slot</label>
+        <div id="bk-times" class="form-grid" hidden>${field('From', `<input class="input" type="time" name="start" step="300" value="${slot.start}" min="${slot.start}" max="${slot.end}">`)}${field('To', `<input class="input" type="time" name="end" step="300" value="${slot.end}" min="${slot.start}" max="${slot.end}">`)}</div>` : ''}
+      ${sao ? '<label class="check"><input type="checkbox" name="override"> Admin override (past the club\'s daily limit)</label>' : ''}
       <div id="bk-suggest"></div>`,
     onSubmit: async v => {
-      const body = { date: pre.date, slotId: v.slotId, roomId: v.roomId, purpose: v.purpose };
-      if (v.slotId === 'fifth') { body.start = v.start; body.end = v.end; }
+      const body = { date: pre.date, slotId: slot.id, roomId, purpose: (v.purpose || '').trim() || v.pp || '' };
+      if (slot.id === 'fifth' && v.part) { body.start = v.start; body.end = v.end; }
       if (sao) { body.clubId = v.clubId; body.override = !!v.override; }
       try { await POST('/api/bookings', body); }
       catch (err) {
         const sug = err.data && err.data.suggest;
         if (sug && sug.length) {
-          $('#bk-suggest', d).innerHTML = `<p class="small" style="margin:0 0 6px">Free rooms you could take instead:</p><div class="row">${sug.map(c => `<button type="button" class="btn ghost sm" data-pick="${esc(c)}">${esc(c)}</button>`).join('')}</div>`;
-          $$('[data-pick]', d).forEach(b => b.onclick = () => { const o = [...$('[name=roomId]', d).options].find(x => x.text.startsWith(b.dataset.pick)); if (o) $('[name=roomId]', d).value = o.value; });
+          $('#bk-suggest', d).innerHTML = `<p class="small" style="margin:0 0 6px"><b>Take one of these instead:</b></p><div class="row">${sug.map(c => `<button type="button" class="btn ghost sm" data-pick="${esc(c)}">${esc(c)}</button>`).join('')}</div>`;
+          $$('[data-pick]', d).forEach(b => b.onclick = () => {
+            const r = cal.rooms.find(x => x.code === b.dataset.pick); if (!r) return;
+            roomId = r.id; $('#bk-room', d).textContent = r.code; $('h2', d).textContent = 'Book ' + r.code; $('.err', d).textContent = ''; $('#bk-suggest', d).innerHTML = '';
+          });
         }
         throw err;
       }
-      toast('Booked'); done();
+      toast(`Booked ${roomCode(roomId)} for ${day}`); done();
     } });
-  const syncRooms = () => {
-    const sid = $('[name=slotId]', d).value, s = cal.slots.find(x => x.id === sid);
-    const rooms = freeRooms(sid);
-    $('[name=roomId]', d).innerHTML = rooms.length ? rooms.map(r => `<option value="${esc(r.id)}" ${r.id === pre.roomId ? 'selected' : ''}>${esc(r.code)}${r.capacity ? ` · ${r.capacity} seats` : ''}</option>`).join('') : '<option value="">No free rooms</option>';
-    $('#bk-times', d).hidden = sid !== 'fifth';
-    const a = $('[name=start]', d), b = $('[name=end]', d);
-    a.min = b.min = s.start; a.max = b.max = s.end; if (!a.value || a.value < s.start || a.value > s.end) a.value = s.start; if (!b.value || b.value > s.end || b.value < s.start) b.value = s.end;
-  };
-  $('[name=slotId]', d).onchange = syncRooms; syncRooms();
+  const part = $('[name=part]', d); if (part) part.onchange = () => { $('#bk-times', d).hidden = !part.checked; };
+  const club = $('[name=clubId]', d); if (club) club.onchange = () => { $('#bk-left', d).innerHTML = leftLine(club.value); };
+  // a purpose button fills nothing else in; typing overrides it
+  $$('[name=pp]', d).forEach(r => r.onchange = () => { $('[name=purpose]', d).value = ''; });
 }
 
 function bookingInfo(cal, id, done) {

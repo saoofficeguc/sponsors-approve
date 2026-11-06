@@ -81,14 +81,14 @@ Built from *Club Room Booking Platform — Requirements (6 Nov 2026)*; it replac
 | Club | Taken from the rep's account, never typed. |
 | SAO | Books for any club, can tick **Admin override** past a limit (marked on the calendar and sheet), cancels anything, blocks rooms or whole days (bookings there are cancelled and the club is notified). |
 
-- **Calendar** (`#/rooms`): day view (phone default), week view, month view; free / booked / your club / blocked colours;
+- **Calendar** (`#/rooms`): day view as a box per room (phone default), week view, month view; day buttons for this week and next plus a calendar date picker; free / booked / your club / blocked colours;
   filters by slot, building and club; "only free". Updates by itself every few seconds. **Public:** anyone can open it
   from the link without signing in (club names shown; who booked is only shown to SAO).
 - **Booking:** tap a free room; the dialog shows the club's remaining quota and, if a room is taken or blocked, says by whom/why
   and suggests free rooms. **My club's bookings** lists upcoming bookings with cancel and edit (purpose, fifth-slot times).
 - **Admin > Rooms:** term, slot times and limits, rooms (add, edit, archive), blocks, CSV export in the old sheet's layout,
   and the security Google Sheet.
-- Starting slot times are placeholders until SAO confirms them: fifth slot 15:45–18:30, after hours 18:30–21:30.
+- Slot times: after hours 17:30–20:00 (shown first), fifth slot 15:15–17:30; SAO can change them in Admin > Rooms.
 - Notifications are inside the site (email would need an email service).
 
 ### Security Google Sheet

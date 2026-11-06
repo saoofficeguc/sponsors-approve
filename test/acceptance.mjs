@@ -361,10 +361,33 @@ let cal, room, MON;
 test('rooms: the calendar is public and starts with the rooms and slot times', async () => {
   MON = nextDay(1);
   cal = (await call('GET', '/api/rooms/calendar?from=' + MON + '&to=' + MON)).data;
-  assert.deepEqual(cal.slots.map(s => [s.id, s.maxPerDay]), [['fifth', 5], ['after', 2]]);
+  assert.deepEqual(cal.slots.map(s => [s.id, s.maxPerDay, s.start, s.end]), [['after', 2, '17:30', '20:00'], ['fifth', 5, '15:15', '17:30']]);
   assert.equal(cal.rooms.filter(r => r.afterHours).length, 9);
   assert.ok(cal.rooms.some(r => r.code === 'H10' && r.fifth && !r.afterHours));
   room = code => cal.rooms.find(r => r.code === code).id;
+});
+
+test('rooms: a site made with the first placeholder times moves to the confirmed ones, once', async () => {
+  const { createDb } = await import('../supabase/functions/_shared/core/db.mjs');
+  const { seedRooms } = await import('../supabase/functions/_shared/core/rooms.mjs');
+  const drv = sqliteDriver(':memory:');
+  await createApp({ driver: drv }).ready();
+  const db = createDb(drv);
+  await db.q("INSERT INTO sp_clubs (id, name, active, sort) VALUES ('c1', 'Old Club', 1, 0)");
+  await db.q(`INSERT INTO sp_slots (id, name, start_time, end_time, max_per_day, sort) VALUES ('fifth', 'Fifth slot', '15:45', '18:30', 5, 0), ('after', 'After hours', '18:30', '21:30', 2, 1)`);
+  await db.q(`INSERT INTO sp_bookings (id, date, room_id, slot_id, club_id, start_time, end_time, active, created_at) VALUES ('b1', '2026-11-09', 'r', 'fifth', 'c1', '16:30', '18:30', 1, 0)`);
+  await db.q(`INSERT INTO sp_bookings (id, date, room_id, slot_id, club_id, start_time, end_time, active, created_at) VALUES ('b2', '2026-11-09', 'r2', 'fifth', 'c1', '15:45', '18:30', 1, 0)`);
+  await db.meta('rooms_v1', '1');
+  await db.tx(() => seedRooms(db));
+  const s = await db.q('SELECT id, start_time, end_time FROM sp_slots ORDER BY sort');
+  assert.deepEqual(s.map(x => [x.id, x.start_time, x.end_time]), [['after', '17:30', '20:00'], ['fifth', '15:15', '17:30']]);
+  assert.equal((await db.one(`SELECT end_time FROM sp_bookings WHERE id = 'b1'`)).end_time, '17:30');
+  const b2 = await db.one(`SELECT start_time, end_time FROM sp_bookings WHERE id = 'b2'`);
+  assert.deepEqual([b2.start_time, b2.end_time], ['15:15', '17:30']);   // whole old slot -> whole new slot
+  // SAO changes the times later: they are not reset
+  await db.q(`UPDATE sp_slots SET start_time = '17:00' WHERE id = 'after'`);
+  await db.tx(() => seedRooms(db));
+  assert.equal((await db.one(`SELECT start_time FROM sp_slots WHERE id = 'after'`)).start_time, '17:00');
 });
 
 test('rooms: one club per room per slot, and the blocked club is told who has it', async () => {
@@ -394,7 +417,7 @@ test('rooms: days, rooms and times that cannot be booked', async () => {
   await bad({ date: MON, slotId: 'after', roomId: room('C5.201') }, /can't be booked for the after hours/);
   await bad({ date: MON, slotId: 'fifth', roomId: room('C5.105'), start: '12:00', end: '13:00' }, /choose times inside it/);
   await bad({ date: MON, slotId: 'fifth', roomId: room('C5.105'), start: '17:00', end: '16:30' }, /end time must be after/);
-  const ok = await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room('C5.105'), start: '16:30', end: '18:00' }, C);
+  const ok = await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room('C5.105'), start: '16:00', end: '17:00' }, C);
   assert.equal(ok.status, 200);
   // reps never choose the club: it comes from the account
   const sneaky = await call('POST', '/api/bookings', { date: MON, slotId: 'fifth', roomId: room('C5.106'), clubId: clubs[0].id }, C);
