@@ -66,6 +66,9 @@ function writeTab(ss, tab, index) {
   const sh = ss.getSheetByName(tab.name) || ss.insertSheet(tab.name, index);
   const cols = tab.rows[0].length, heads = tab.header.length, rows = tab.rows.length;
   const top = 5, body = top + heads, total = body + rows + 2;
+  // start from a clean tab: nothing frozen, nothing merged (Google won't merge across a frozen column)
+  sh.setFrozenRows(0);
+  sh.setFrozenColumns(0);
   sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
   sh.clear();
   fitSize(sh, total, cols);
@@ -108,7 +111,7 @@ function writeTab(ss, tab, index) {
 
   tab.widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
   sh.setFrozenRows(top + heads - 1);
-  sh.setFrozenColumns(tab.freezeCols || 0);
+  // (only rows are frozen: the title bands stretch across every column, which a frozen column would split)
   sh.setTabColor(index === 0 ? '#FFD500' : '#121212');
   // warn anyone who tries to type in it (the site overwrites it anyway)
   if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length)
