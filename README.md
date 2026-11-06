@@ -1,4 +1,4 @@
-# SAO Sponsors — Sponsor Management System
+# SAO Portal — club sponsors and room booking
 
 Website for the GUC Student Activities Office that records each club's sponsor outreach, stops two clubs
 from claiming the same sponsor, and gives SAO Heads full oversight. Built from

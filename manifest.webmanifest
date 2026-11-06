@@ -1,6 +1,6 @@
 {
-  "name": "SAO Sponsors",
-  "short_name": "Sponsors",
+  "name": "SAO Portal",
+  "short_name": "SAO Portal",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#FAFAF7",

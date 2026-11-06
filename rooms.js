@@ -1,4 +1,4 @@
-// SAO Rooms — club room booking: the public calendar (day, week, month), booking, "My club's bookings"
+// SAO Portal, Rooms — club room booking: the public calendar (day, week, month), booking, "My club's bookings"
 // and Admin > Rooms (rooms, slot times, term, blocks, the security Google Sheet). Uses the helpers in app.js.
 'use strict';
 
@@ -346,7 +346,7 @@ async function viewMyBookings() {
 function renderPublicRooms() {
   stopRoomsLive();
   $('#app').innerHTML = `<header class="top"><div class="top-in">
-      <a class="brand" href="#/rooms" aria-label="SAO Rooms"><img src="assets/brand/sponsors-mark.svg" alt=""><b>SAO <span>Rooms</span></b></a>
+      <a class="brand" href="#/rooms" aria-label="SAO Portal"><img src="assets/brand/sponsors-mark.svg" alt=""><b>SAO <span>Portal</span></b></a>
       <div class="top-tools"><a class="btn key sm" href="#/" id="pub-signin">Club rep? Sign in</a></div></div></header>
     <main id="main"></main>
     <footer class="foot"><img src="assets/guc-logo.jpg" alt="German University in Cairo"><span>Student Activities Office · Times in Cairo time</span></footer>`;

@@ -1,4 +1,4 @@
-// SAO Sponsors — the website. Talks to the server (supabase/functions/_shared/core/app.mjs) at window.SP_API.
+// SAO Portal — the website (sponsors and rooms). Talks to the server (supabase/functions/_shared/core/app.mjs) at window.SP_API.
 // The server decides what each person may see and do; this page only shows what it is given.
 'use strict';
 const API = window.SP_API || '';
@@ -213,7 +213,7 @@ const empty = (title, text = '') => `<div class="empty"><b>${esc(title)}</b>${es
 
 // ---------- start ----------
 const lockup = `<div class="login-head"><img src="assets/brand/sponsors-mark.svg" alt="">
-  <div class="lockup"><b>SAO</b><span class="brand-bars" aria-hidden="true"><i></i><i></i><i></i></span><span>Sponsor Registry</span>
+  <div class="lockup"><b>SAO</b><span class="brand-bars" aria-hidden="true"><i></i><i></i><i></i></span><span>Student Activities Portal</span>
   <span class="ar" lang="ar" dir="rtl">مكتب الأنشطة الطلابية</span></div></div>`;
 
 async function loadSession() { S = await GET('/api/session'); return S; }
@@ -229,7 +229,7 @@ function playIntro() {
   const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const el = document.createElement('div');
   el.className = 'intro' + (reduced ? ' still' : '');
-  el.setAttribute('role', 'img'); el.setAttribute('aria-label', 'SAO Sponsor Registry');
+  el.setAttribute('role', 'img'); el.setAttribute('aria-label', 'SAO Portal');
   el.innerHTML = `<div class="intro-stage">
       <svg viewBox="14 14 92 100" width="150" height="163" aria-hidden="true"><g transform="translate(6,5) scale(0.9)">
         <rect class="l" x="34" y="30" width="52" height="70" rx="10" fill="#E31E24"/>
@@ -239,8 +239,8 @@ function playIntro() {
             fill="#FFD500" stroke="#121212" stroke-width="4" stroke-linejoin="round"/></g></g></svg>
       <div class="wm">SAO</div>
       <div class="bars"><span></span><span></span><span></span></div>
-      <div class="sub"><div>Sponsor Registry</div><div lang="ar" dir="rtl">مكتب الأنشطة الطلابية</div></div>
-      <div class="intro-tag">One club per sponsor.</div>
+      <div class="sub"><div>Student Activities Portal</div><div lang="ar" dir="rtl">مكتب الأنشطة الطلابية</div></div>
+      <div class="intro-tag">Sponsors and rooms, sorted.</div>
     </div>
     <div class="intro-foot">German University in Cairo</div>`;
   document.body.appendChild(el);
@@ -441,7 +441,7 @@ function frame() {
   const cur = h => isOn(h) ? 'class="on" aria-current="page"' : '';
   $('#app').innerHTML = `
     <header class="top"><div class="top-in">
-      <a class="brand" href="#/" aria-label="SAO Sponsors home"><img src="assets/brand/sponsors-mark.svg" alt=""><b>SAO <span>Sponsors</span></b></a>
+      <a class="brand" href="#/" aria-label="SAO Portal home"><img src="assets/brand/sponsors-mark.svg" alt=""><b>SAO <span>Portal</span></b></a>
       <nav class="nav" aria-label="Main">${items.map(([h, t, , , n]) => `<a href="${h}" ${cur(h)}>${t}${n ? `<span class="count">${n}</span>` : ''}</a>`).join('')}</nav>
       <div class="top-tools">
         <button class="icon-btn" id="bell" aria-label="Notifications">${svg('bell')}<span class="dot" ${S.unread ? '' : 'hidden'}>${S.unread || ''}</span></button>

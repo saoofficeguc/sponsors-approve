@@ -25,7 +25,7 @@ function doPost(e) {
 }
 function reply(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
-// Fetch a fresh copy from the site (every 5 minutes, and from the "SAO Rooms" menu)
+// Fetch a fresh copy from the site (every 5 minutes, and from the "SAO Portal" menu)
 function syncNow() {
   const r = UrlFetchApp.fetch(API_URL + '/api/rooms-sheet/data?secret=' + encodeURIComponent(SECRET), { muteHttpExceptions: true });
   if (r.getResponseCode() !== 200) throw new Error('The booking site answered ' + r.getResponseCode() + ': ' + r.getContentText().slice(0, 200));
@@ -37,11 +37,11 @@ function setup() {
   ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('syncNow').timeBased().everyMinutes(5).create();
   syncNow();
-  SpreadsheetApp.getActive().toast('Room bookings are connected. The tabs update by themselves.', 'SAO Rooms', 8);
+  SpreadsheetApp.getActive().toast('Room bookings are connected. The tabs update by themselves.', 'SAO Portal', 8);
 }
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('SAO Rooms').addItem('Sync now', 'syncNow').addToUi();
+  SpreadsheetApp.getUi().createMenu('SAO Portal').addItem('Sync now', 'syncNow').addToUi();
 }
 
 function write(data) {
