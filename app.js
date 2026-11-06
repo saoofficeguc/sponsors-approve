@@ -86,6 +86,33 @@ const I = {
   back: '<path d="M15 6l-6 6 6 6"/>',
 };
 const svg = (name, cls = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" class="${cls}">${I[name] || ''}</svg>`;
+
+// Loading sign: the Sponsors logo in light grey, filling up with its colours like a flask (wavy surface, loops).
+let loaderN = 0;
+const MARK_PARTS = (l, r, f, star, stroke) => `<rect x="34" y="30" width="52" height="70" rx="10" fill="${l}" transform="rotate(-20 60 104)"/>
+  <rect x="34" y="30" width="52" height="70" rx="10" fill="${r}" transform="rotate(20 60 104)"/>
+  <rect x="34" y="26" width="52" height="74" rx="10" fill="${f}" stroke="${stroke}" stroke-width="3"/>
+  <path d="M60 45 L64.82 57.37 L78.07 58.13 L67.8 66.53 L71.17 79.37 L60 72.2 L48.83 79.37 L52.2 66.53 L41.93 58.13 L55.18 57.37 Z" fill="${star}" stroke="${stroke}" stroke-width="4" stroke-linejoin="round"/>`;
+// liquid: a row of waves on top of a deep block; it rises (bottom to top) while the waves slide sideways
+let wave = 'M-110 0';
+for (let i = 0; i < 12; i++) wave += ' q13 -7 26 0 q13 7 26 0';
+wave += ' L214 160 L-110 160 Z';
+const LIQUID_MOTION = `<animateTransform attributeName="transform" type="translate" values="0 116; 0 14; 0 14" keyTimes="0; .82; 1" dur="2.2s" repeatCount="indefinite"/>
+      <animateTransform attributeName="transform" type="translate" values="0 0; -52 0" dur="1s" repeatCount="indefinite" additive="sum"/>`;
+function loader(size = 60, text = 'Loading') {
+  const id = 'sp-fill-' + (++loaderN);
+  const still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;   // half full, not moving
+  const motion = still ? '' : LIQUID_MOTION;
+  return `<div class="loader" role="status" aria-label="${esc(text)}"><svg viewBox="14 14 92 100" width="${size}" height="${Math.round(size * 100 / 92)}" aria-hidden="true">
+    <defs><clipPath id="${id}"><path d="${wave}" ${still ? 'transform="translate(0 64)"' : ''}>${motion}</path></clipPath></defs>
+    <g transform="translate(6,5) scale(0.9)">
+      <g class="loader-empty" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round">
+        <rect x="34" y="30" width="52" height="70" rx="10" transform="rotate(-20 60 104)"/><rect x="34" y="30" width="52" height="70" rx="10" transform="rotate(20 60 104)"/>
+        <rect x="34" y="26" width="52" height="74" rx="10" style="fill:var(--lbg)"/>
+        <path d="M60 45 L64.82 57.37 L78.07 58.13 L67.8 66.53 L71.17 79.37 L60 72.2 L48.83 79.37 L52.2 66.53 L41.93 58.13 L55.18 57.37 Z"/></g>
+      <g clip-path="url(#${id})">${MARK_PARTS('#E31E24', '#FFD500', '#FFFFFF', '#FFD500', '#121212')}</g>
+    </g></svg></div>`;
+}
 const label = st => (S && S.statuses && S.statuses[st]) || st;
 const chip = st => `<span class="chip ${esc(st)}">${svg(st)}${esc(label(st))}</span>`;
 const availChip = s => s.mine ? `<span class="chip mine">${svg('confirmed')}Your club</span>`
@@ -189,8 +216,8 @@ const lockup = `<div class="login-head"><img src="assets/brand/sponsors-mark.svg
 
 async function loadSession() { S = await GET('/api/session'); return S; }
 
-// Opening screen (from the SAO brand kit intro, with the Sponsors star): once each time the site is opened,
-// tap to skip, still frame when the device asks for reduced motion. The site loads behind it.
+// Opening screen (from the SAO brand kit intro, with the Sponsors star): once each time the site is opened;
+// still frame when the device asks for reduced motion. The site loads behind it.
 let introDone = false;
 function playIntro() {
   if (introDone) return Promise.resolve();
@@ -213,20 +240,18 @@ function playIntro() {
       <div class="sub"><div>Sponsor Registry</div><div lang="ar" dir="rtl">مكتب الأنشطة الطلابية</div></div>
       <div class="intro-tag">One club per sponsor.</div>
     </div>
-    <div class="intro-foot">German University in Cairo</div>
-    <div class="intro-skip">Tap to skip</div>`;
+    <div class="intro-foot">German University in Cairo</div>`;
   document.body.appendChild(el);
   return new Promise(resolve => {
     let done = false;
     const finish = () => { if (done) return; done = true; el.classList.add('out'); setTimeout(() => el.remove(), 450); resolve(); };
-    el.addEventListener('click', finish);
-    document.addEventListener('keydown', function k(e) { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { document.removeEventListener('keydown', k); finish(); } });
     setTimeout(finish, reduced ? 1400 : 3400);
   });
 }
 
 async function boot() {
   const intro = playIntro();
+  if (!S) $('#app').innerHTML = `<div class="boot-loader">${loader(72)}</div>`;
   let s;
   try { s = await loadSession(); await intro; }
   catch (e) {
@@ -434,7 +459,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closePop(); 
 async function openNotices() {
   if ($('.pop.notices')) return closePop();
   closePop();
-  const p = document.createElement('div'); p.className = 'pop notices'; p.innerHTML = '<div class="pop-head"><b>Notifications</b></div><p class="muted" style="padding:16px">Loading…</p>';
+  const p = document.createElement('div'); p.className = 'pop notices'; p.innerHTML = '<div class="pop-head"><b>Notifications</b></div>' + loader(40);
   $('.top').appendChild(p);
   try {
     const list = await GET('/api/notices');
@@ -482,7 +507,7 @@ async function render() {
   const seq = ++renderSeq;
   frame();
   const main = $('#main');
-  main.innerHTML = '<p class="muted">Loading…</p>';
+  main.innerHTML = loader(64);
   const path = location.hash.split('?')[0];
   const route = ROUTES.find(([re, , role]) => re.test(path) && (!role || role === S.user.role));
   try {
@@ -531,7 +556,7 @@ function filteredClaims(container, { fixed = {}, club = false, exportBtn = false
       ${sao && !fixed.club ? `<select class="input opt" name="club" aria-label="Club">${opts(S.clubs, p.get('club') || '', 'All clubs')}</select>` : ''}
       ${sao ? `<input class="input opt" type="date" name="from" value="${esc(p.get('from') || '')}" aria-label="Added from" title="Added from"><input class="input opt" type="date" name="to" value="${esc(p.get('to') || '')}" aria-label="Added until" title="Added until">` : ''}
       ${exportBtn ? '<button type="button" class="btn ghost opt" id="csv">Export CSV</button>' : ''}
-    </form><div class="list-body"><p class="muted" style="padding:20px">Loading…</p></div>`;
+    </form><div class="list-body">${loader(44)}</div>`;
   const form = $('form', container);
   // phones: extra filters fold away behind a "Filters" button (opened already if one is in use)
   const used = ['category', 'club', 'from', 'to'].some(k => p.get(k));

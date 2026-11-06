@@ -343,7 +343,7 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-to
 
 /* ---------- Opening screen ---------- */
 .intro { position: fixed; inset: 0; z-index: 100; background: radial-gradient(900px 600px at 50% 38%, #1E1E1E, #0B0B0B); color: #fff;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: opacity .45s ease; }
+  display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity .45s ease; }
 .intro.out { opacity: 0; pointer-events: none; }
 .intro-stage { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 24px; }
 .intro .l, .intro .r, .intro .f { transform-box: view-box; transform-origin: 60px 104px; }
@@ -362,7 +362,6 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-to
 .intro .sub div:last-child { font-family: var(--font-ar); font-size: 15px; color: #CFCFCF; margin-top: 2px; }
 .intro .intro-tag { margin-top: 28px; font-size: 15px; color: var(--yellow); font-weight: 600; letter-spacing: .02em; animation: iFade .7s ease-out 2.05s both; }
 .intro-foot { position: absolute; bottom: calc(28px + env(safe-area-inset-bottom)); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #8E8E88; animation: iFade .8s ease-out 1.9s both; }
-.intro-skip { position: absolute; top: calc(18px + env(safe-area-inset-top)); right: 20px; font-size: 12px; color: #6E6E68; animation: iFade .4s ease-out .6s both; }
 .intro.still, .intro.still * { animation: none !important; }
 @keyframes iL { 0% { transform: rotate(0) translateY(36px); opacity: 0; } 100% { transform: rotate(-20deg); opacity: 1; } }
 @keyframes iR { 0% { transform: rotate(0) translateY(36px); opacity: 0; } 100% { transform: rotate(20deg); opacity: 1; } }
@@ -372,3 +371,10 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-to
 @keyframes iBar { 0% { transform: scaleX(0); } 100% { transform: scaleX(1); } }
 @keyframes iFade { 0% { opacity: 0; } 100% { opacity: 1; } }
 @media (max-width: 860px) { .intro .wm { font-size: 64px; } .intro svg { width: 124px; height: 135px; } }
+
+/* ---------- Loading sign: the logo filling like a flask ---------- */
+.loader { --lbg: var(--paper); display: grid; place-items: center; padding: 56px 0; color: color-mix(in srgb, var(--faint) 55%, transparent); }
+.loader svg { display: block; overflow: visible; filter: drop-shadow(0 2px 6px rgba(0,0,0,.06)); }
+.list-body .loader, .pop .loader, .card .loader { --lbg: var(--card); }
+.list-body .loader, .pop .loader { padding: 32px 0; }
+.boot-loader { min-height: 100vh; display: grid; place-items: center; }
