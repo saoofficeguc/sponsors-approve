@@ -189,10 +189,48 @@ const lockup = `<div class="login-head"><img src="assets/brand/sponsors-mark.svg
 
 async function loadSession() { S = await GET('/api/session'); return S; }
 
+// Opening screen (from the SAO brand kit intro, with the Sponsors star): once each time the site is opened,
+// tap to skip, still frame when the device asks for reduced motion. The site loads behind it.
+let introDone = false;
+function playIntro() {
+  if (introDone) return Promise.resolve();
+  introDone = true;
+  if (store.get('sp-intro-off') === '1') return Promise.resolve();
+  try { if (sessionStorage.getItem('sp-intro') === '1') return Promise.resolve(); sessionStorage.setItem('sp-intro', '1'); } catch (e) { /* private window: play it */ }
+  const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const el = document.createElement('div');
+  el.className = 'intro' + (reduced ? ' still' : '');
+  el.setAttribute('role', 'img'); el.setAttribute('aria-label', 'SAO Sponsor Registry');
+  el.innerHTML = `<div class="intro-stage">
+      <svg viewBox="14 14 92 100" width="150" height="163" aria-hidden="true"><g transform="translate(6,5) scale(0.9)">
+        <rect class="l" x="34" y="30" width="52" height="70" rx="10" fill="#E31E24"/>
+        <rect class="r" x="34" y="30" width="52" height="70" rx="10" fill="#FFD500"/>
+        <g class="f"><rect x="34" y="26" width="52" height="74" rx="10" fill="#FFFFFF" stroke="#121212" stroke-width="3"/>
+          <path class="star" d="M60 45 L64.82 57.37 L78.07 58.13 L67.8 66.53 L71.17 79.37 L60 72.2 L48.83 79.37 L52.2 66.53 L41.93 58.13 L55.18 57.37 Z"
+            fill="#FFD500" stroke="#121212" stroke-width="4" stroke-linejoin="round"/></g></g></svg>
+      <div class="wm">SAO</div>
+      <div class="bars"><span></span><span></span><span></span></div>
+      <div class="sub"><div>Sponsor Registry</div><div lang="ar" dir="rtl">مكتب الأنشطة الطلابية</div></div>
+      <div class="intro-tag">One club per sponsor.</div>
+    </div>
+    <div class="intro-foot">German University in Cairo</div>
+    <div class="intro-skip">Tap to skip</div>`;
+  document.body.appendChild(el);
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => { if (done) return; done = true; el.classList.add('out'); setTimeout(() => el.remove(), 450); resolve(); };
+    el.addEventListener('click', finish);
+    document.addEventListener('keydown', function k(e) { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { document.removeEventListener('keydown', k); finish(); } });
+    setTimeout(finish, reduced ? 1400 : 3400);
+  });
+}
+
 async function boot() {
+  const intro = playIntro();
   let s;
-  try { s = await loadSession(); }
+  try { s = await loadSession(); await intro; }
   catch (e) {
+    await intro;
     $('#app').innerHTML = `<div class="login"><div class="login-card">${lockup}<h2>Can't reach the server</h2>
       <p class="muted" style="margin:8px 0 20px">${esc(e.message)} If it keeps happening, the server may be starting up — wait a minute.</p>
       <button class="btn key block" onclick="location.reload()">Try again</button></div></div>`;
