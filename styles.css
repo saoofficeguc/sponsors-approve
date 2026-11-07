@@ -33,6 +33,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* layout styles must never show something marked hidden */
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--paper); color: var(--ink); font: 400 16px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
 [lang="ar"] { font-family: var(--font-ar); }
@@ -625,3 +626,15 @@ button.rt:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
   .quick { grid-template-columns: 1fr 1fr; }
   .dr-slots { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---------- Fifth slot: typed rooms ---------- */
+.rt-add { border: 2px dashed color-mix(in srgb, var(--ink) 30%, var(--line)); background: var(--card); align-items: flex-start; }
+.rt-add:hover { border-color: var(--ink); }
+.rt-plus { width: 28px; height: 28px; border-radius: 50%; background: var(--yellow); color: #121212; display: grid; place-items: center; font-weight: 900; font-size: 20px; line-height: 1; }
+.bk-bld .bk-chip span { min-width: 46px; text-align: center; font-size: 16px; font-weight: 900; }
+.bk-roomline { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.bk-roomline b { font-size: 22px; font-weight: 900; min-width: 22px; text-align: center; }
+.bk-roomline .input { font-size: 20px; font-weight: 800; height: 50px; letter-spacing: .02em; max-width: 220px; }
+.hint.bad { color: var(--red-text); font-weight: 700; }
+.hint.good { color: #1E6B3A; font-weight: 700; }
+.rw-group td .rw-add { height: 28px; font-size: 12.5px; padding: 0 10px; }

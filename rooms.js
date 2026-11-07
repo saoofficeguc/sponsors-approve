@@ -97,7 +97,8 @@ async function viewRooms(main, opts = {}) {
     const d = st.date;
     if (!teaching(d)) return `<div class="card">${empty('No room bookings on this day', d < cal.term.start || d > cal.term.end ? `The term runs ${rDMY(cal.term.start)} – ${rDMY(cal.term.end)}.` : `Rooms are booked on ${cal.term.weekdays.map(w => R_DAYS[w]).join(', ')}. Pick another day above.`)}</div>`;
     return slotsShown().map(s => {
-      const all = roomsFor(s.id), boxes = all.map(r => ({ r, x: cellState(d, r, s.id) })).filter(({ x }) => passesFilters(x));
+      const typedSlot = s.id === 'fifth';   // fifth-slot rooms are written by the rep: show only the ones in use
+      const all = roomsFor(s.id), boxes = all.map(r => ({ r, x: cellState(d, r, s.id) })).filter(({ x }) => passesFilters(x) && (!typedSlot || x.b || x.k));
       const free = all.filter(r => cellState(d, r, s.id).kind === 'free').length;
       const left = rep ? Math.max(0, s.maxPerDay - used(d, s.id)) : null;
       const custom = b => s.id === 'fifth' && (b.start !== s.start || b.end !== s.end) ? rT12(b.start) + ' – ' + rT12(b.end) : '';
@@ -112,9 +113,9 @@ async function viewRooms(main, opts = {}) {
         return `<div class="rt k-${x.kind}"><span class="rt-code">${esc(r.code)}</span><span class="rt-sub">${x.kind === 'past' ? 'Past' : '—'}</span></div>`;
       };
       return `<section class="rt-slot rt-${s.id}"><div class="rt-head">
-          <div><h2>${esc(s.name)}</h2><div class="muted small">${rT12(s.start)} – ${rT12(s.end)} · <b class="rt-free-n">${free} of ${all.length} free</b></div></div>
+          <div><h2>${esc(s.name)}</h2><div class="muted small">${rT12(s.start)} – ${rT12(s.end)} · ${typedSlot ? `<b>${boxes.filter(({ x }) => x.b).length} booked</b> · any room in A, B, C, D or H` : `<b class="rt-free-n">${free} of ${all.length} free</b>`}</div></div>
           ${left !== null ? `<span class="rt-quota ${left ? '' : 'none'}">${left ? `${left} of ${s.maxPerDay} left for your club` : `Your club has used all ${s.maxPerDay}`}</span>` : ''}</div>
-        <div class="rt-grid">${boxes.length ? boxes.map(box).join('') : `<p class="muted small">Nothing matches the filters.</p>`}</div></section>`;
+        <div class="rt-grid">${typedSlot && canBook(d, s.id) ? `<button class="rt rt-add" data-book-typed="${d}"><span class="rt-plus">+</span><span class="rt-code">Book a room</span><span class="rt-sub">Type the building and number</span></button>` : ''}${boxes.length ? boxes.map(box).join('') : typedSlot ? (canBook(d, s.id) ? '' : '<p class="muted small">No fifth-slot rooms booked.</p>') : `<p class="muted small">Nothing matches the filters.</p>`}</div></section>`;
     }).join('');
   }
 
@@ -129,9 +130,9 @@ async function viewRooms(main, opts = {}) {
         const x = cellState(d, r, s.id);
         if ((x.b || x.k) && passesFilters(x)) items.push({ s, r, x });
       }
-      const free = slotsShown().map(s => `${roomsFor(s.id).filter(r => cellState(d, r, s.id).kind === 'free').length} ${s.name.toLowerCase()}`).join(' · ');
+      const free = slotsShown().map(s => s.id === 'fifth' ? `${cal.bookings.filter(b => b.date === d && b.slotId === 'fifth').length} fifth slot booked` : `${roomsFor(s.id).filter(r => cellState(d, r, s.id).kind === 'free').length} ${s.name.toLowerCase()} free`).join(' · ');
       return `<section class="wp-day ${d === cal.today ? 'is-today' : ''}"><div class="wp-head"><div><b>${esc(R_DAYS_LONG[rWd(d)])}</b> <span class="muted">${rDMY(d)}</span>
-          <div class="muted small">${d < cal.today ? 'Past' : `Free: ${free}`}</div></div>
+          <div class="muted small">${d < cal.today ? 'Past' : free}</div></div>
           <button class="btn ${d >= cal.today ? 'key' : 'ghost'} sm" data-goto="${d}">${d >= cal.today && (rep || sao) ? 'Book' : 'Open'}</button></div>
         ${items.length ? `<ul class="wp-list">${items.map(({ s, r, x }) => `<li ${x.b ? `data-info="${esc(x.b.id)}"` : ''} class="k-${x.kind}">
             <span class="wp-room">${esc(r.code)}</span><span class="rs ${s.id === 'after' ? 'rs-booked' : 'rs-mine'}">${esc(s.name)}</span>
@@ -146,16 +147,16 @@ async function viewRooms(main, opts = {}) {
     const days = cal.term.weekdays.slice().sort((a, b) => a - b).map(w => rAdd(s0, w));
     const head = `<tr><th class="rw-room">Room</th>${days.map(d => `<th class="${d === cal.today ? 'is-today' : ''}"><button class="link-btn rw-day" data-goto="${d}">${R_DAYS[rWd(d)]}<span>${rDMY(d).slice(0, 5)}</span></button></th>`).join('')}</tr>`;
     const body = slotsShown().map(s => {
-      const rooms = roomsFor(s.id).filter(r => days.some(d => passesFilters(cellState(d, r, s.id))));
-      return `<tr class="rw-group"><td colspan="${days.length + 1}">${esc(s.name)} <span class="muted">${rT12(s.start)} – ${rT12(s.end)}</span></td></tr>` +
+      const rooms = roomsFor(s.id).filter(r => days.some(d => { const x = cellState(d, r, s.id); return passesFilters(x) && (s.id !== 'fifth' || x.b || x.k); }));
+      return `<tr class="rw-group"><td>${esc(s.name)} <span class="muted">${rT12(s.start)} – ${rT12(s.end)}</span></td>${days.map(d => `<td>${s.id === 'fifth' && canBook(d, 'fifth') ? `<button class="btn ghost sm rw-add" data-book-typed="${d}">+ Book</button>` : ''}</td>`).join('')}</tr>` +
         (rooms.length ? rooms.map(r => `<tr><td class="rw-room"><b>${esc(r.code)}</b></td>${days.map(d => {
           const x = cellState(d, r, s.id), show = passesFilters(x);
           if (!show) return '<td class="rw-cell k-hidden"></td>';
           if (x.b) return `<td class="rw-cell k-${x.kind}"><button class="rw-btn" data-info="${esc(x.b.id)}" title="${esc(clubById(x.b.clubId).name)}">${clubChip(x.b, true)}</button></td>`;
           if (x.k) return `<td class="rw-cell k-blocked"><span title="${esc(x.k.reason)}">${svg('lock')}Blocked</span></td>`;
-          if (x.kind === 'free') return `<td class="rw-cell k-free">${canBook(d, s.id) ? `<button class="rw-btn" data-book="${esc(r.id)}" data-slot="${s.id}" data-date="${d}">Free</button>` : '<span>Free</span>'}</td>`;
+          if (x.kind === 'free') return s.id === 'fifth' ? '<td class="rw-cell"></td>' : `<td class="rw-cell k-free">${canBook(d, s.id) ? `<button class="rw-btn" data-book="${esc(r.id)}" data-slot="${s.id}" data-date="${d}">Free</button>` : '<span>Free</span>'}</td>`;
           return `<td class="rw-cell k-${x.kind}"></td>`;
-        }).join('')}</tr>`).join('') : `<tr><td colspan="${days.length + 1}" class="muted small" style="padding:12px 16px">Nothing matches the filters</td></tr>`);
+        }).join('')}</tr>`).join('') : `<tr><td colspan="${days.length + 1}" class="muted small" style="padding:12px 16px">${s.id === 'fifth' ? 'No fifth-slot rooms booked this week' : 'Nothing matches the filters'}</td></tr>`);
     }).join('');
     return `<div class="card flush"><div class="table-wrap"><table class="rw-table">${head}${body}</table></div></div>`;
   }
@@ -170,6 +171,7 @@ async function viewRooms(main, opts = {}) {
       if (d.slice(0, 7) !== st.date.slice(0, 7)) return '<td class="rm-cell rm-out"></td>';
       const t = teaching(d);
       const counts = t && d < cal.today ? '<div class="muted small">Past</div>' : t ? slotsShown().map(s => { const rooms = roomsFor(s.id); const free = rooms.filter(r => cellState(d, r, s.id).kind === 'free').length;
+        if (s.id === 'fifth') return `<div class="rm-count"><span>${esc(s.name)}</span><b>${cal.bookings.filter(b => b.date === d && b.slotId === 'fifth').length}</b> booked</div>`;
         return `<div class="rm-count"><span>${esc(s.name)}</span><b>${free}/${rooms.length}</b> free</div>`; }).join('') : '<div class="muted small">No bookings</div>';
       const mine = myClub ? cal.bookings.filter(b => b.date === d && b.clubId === myClub).length : 0;
       return `<td class="rm-cell ${d === cal.today ? 'is-today' : ''} ${t ? '' : 'rm-closed'}"><button class="rm-btn" data-goto="${d}" ${t ? '' : 'disabled'}>
@@ -251,6 +253,7 @@ async function viewRooms(main, opts = {}) {
     $('#rf').onchange = () => { const f = new FormData($('#rf')); st.slot = f.get('slot') || ''; st.building = f.get('building') || ''; st.club = f.get('club') || ''; st.free = !!f.get('free'); keepUrl(); draw(); };
     $$('[data-goto]').forEach(b => b.onclick = () => { st.date = b.dataset.goto; st.view = phone || st.view === 'week' ? 'day' : 'week'; refreshView(); });
     $$('[data-book]').forEach(b => b.onclick = () => bookDialog(cal, { date: b.dataset.date, slotId: b.dataset.slot, roomId: b.dataset.book }, refreshView));
+    $$('[data-book-typed]').forEach(b => b.onclick = () => bookDialog(cal, { date: b.dataset.bookTyped, slotId: 'fifth' }, refreshView));
     $$('[data-info]').forEach(b => b.onclick = () => bookingInfo(cal, b.dataset.info, refreshView));
     $('#share').onclick = async () => {
       const url = location.href.split('#')[0] + '#/rooms?' + new URLSearchParams({ view: st.view, date: st.date });
@@ -274,17 +277,22 @@ function bookDialog(cal, pre, done) {
   const me = S.user, sao = me.role === 'sao';
   const slot = cal.slots.find(s => s.id === pre.slotId);
   let roomId = pre.roomId;
+  const typed = slot.id === 'fifth' && !roomId;   // the rep writes the room: building + number
   const roomCode = id => (cal.rooms.find(r => r.id === id) || {}).code || '';
   const used = clubId => cal.bookings.filter(b => b.date === pre.date && b.slotId === slot.id && b.clubId === clubId).length;
   const leftLine = clubId => { const l = Math.max(0, slot.maxPerDay - used(clubId));
     return clubId ? `${l} of ${slot.maxPerDay} ${esc(slot.name.toLowerCase())} rooms left for ${clubId === me.clubId ? 'your club' : esc(clubName(clubId))} that day${l ? '' : sao ? ' — tick override to book anyway' : ''}` : ''; };
   const day = `${R_DAYS_LONG[rWd(pre.date)]} ${rDMY(pre.date)}`;
   const purposes = ['Session', 'Meeting', 'Workshop', 'Training', 'Rehearsal'];
-  const d = dialog({ title: `Book ${roomCode(roomId)}`, key: true, submit: 'Book it',
+  const d = dialog({ title: typed ? 'Book a fifth-slot room' : `Book ${roomCode(roomId)}`, key: true, submit: 'Book it',
     body: `<div class="bk-summary">
         <div><span class="label">Day</span><b>${esc(day)}</b></div>
         <div><span class="label">${esc(slot.name)}</span><b>${rT12(slot.start)} – ${rT12(slot.end)}</b></div>
-        <div><span class="label">Room</span><b id="bk-room">${esc(roomCode(roomId))}</b></div></div>
+        ${typed ? '' : `<div><span class="label">Room</span><b id="bk-room">${esc(roomCode(roomId))}</b></div>`}</div>
+      ${typed ? `<div class="field"><span>Which room?</span>
+        <div class="bk-chips bk-bld">${['A', 'B', 'C', 'D', 'H'].map(b => `<label class="bk-chip"><input type="radio" name="building" value="${b}" ${b === 'C' ? 'checked' : ''}><span>${b}</span></label>`).join('')}</div>
+        <div class="bk-roomline"><b id="bk-prefix">C</b><input class="input" name="roomNumber" inputmode="decimal" autocomplete="off" maxlength="8" placeholder="5.101" aria-label="Room number"></div>
+        <p class="hint" id="bk-roomhint">Pick the building, then write the room number — for example C + 5.101, or H + 12.</p><p class="err" id="bk-roomerr"></p></div>` : ''}
       ${sao ? field('For which club?', `<select class="input" name="clubId" required>${opts(cal.clubs.filter(c => c.active), '', 'Choose a club')}</select>`) : ''}
       <p class="bk-left" id="bk-left">${sao ? '' : leftLine(me.clubId)}</p>
       <div class="field"><span>What is it for? <em>(optional)</em></span>
@@ -299,6 +307,10 @@ function bookDialog(cal, pre, done) {
       <div id="bk-suggest"></div>`,
     onSubmit: async v => {
       const body = { date: pre.date, slotId: slot.id, roomId, purpose: (v.purpose || '').trim() || v.pp || '' };
+      if (typed) {
+        if (!(v.roomNumber || '').trim()) { $('#bk-roomerr', d).textContent = 'Write the room number.'; $('[name=roomNumber]', d).focus(); throw new Error('Write the room number.'); }
+        delete body.roomId; body.building = v.building; body.roomNumber = v.roomNumber;
+      }
       if (slot.id === 'fifth' && v.part) { body.start = v.start; body.end = v.end; }
       if (sao) { body.clubId = v.clubId; body.override = !!v.override; }
       if (v.rep && v.until) body.repeatUntil = v.until;
@@ -318,14 +330,31 @@ function bookDialog(cal, pre, done) {
       if (res && res.booked) {
         // a weekly repeat: say which weeks worked and which didn't
         if (res.skipped.length) setTimeout(() => dialog({ title: `Booked ${plural(res.booked.length, 'week')}`, submit: 'OK',
-          intro: `${esc(roomCode(roomId))} every ${R_DAYS_LONG[rWd(pre.date)]}. These weeks couldn't be booked:`,
+          intro: `${esc(typed ? v.building + v.roomNumber.replace(/^[A-Za-z]+/, '') : roomCode(roomId))} every ${R_DAYS_LONG[rWd(pre.date)]}. These weeks couldn't be booked:`,
           body: `<ul class="list">${res.skipped.map(x => `<li><div class="grow"><b>${esc(rDay(x.date))}</b><div class="muted small">${esc(x.reason)}</div></div>
             <a class="btn ghost sm" href="#/rooms?view=day&date=${x.date}">Pick another room</a></li>`).join('')}</ul>`, onSubmit: async () => {} }), 300);
-        else toast(`Booked ${roomCode(roomId)} for ${plural(res.booked.length, 'week')}`);
-      } else toast(`Booked ${roomCode(roomId)} for ${day}`);
+        else toast(`Booked ${typed ? (v.building + v.roomNumber.replace(/^[A-Za-z]+/, '')) : roomCode(roomId)} for ${plural(res.booked.length, 'week')}`);
+      } else toast(`Booked ${typed ? (v.building + v.roomNumber.replace(/^[A-Za-z]+/, '')) : roomCode(roomId)} for ${day}`);
       done();
     } });
   const part = $('[name=part]', d); if (part) part.onchange = () => { $('#bk-times', d).hidden = !part.checked; };
+  if (typed) {
+    const num = $('[name=roomNumber]', d), hint = $('#bk-roomhint', d), err = $('#bk-roomerr', d);
+    const check = () => {
+      const b = ($('[name=building]:checked', d) || {}).value || '', n = num.value.trim().replace(/^[A-Za-z]+/, '');
+      $('#bk-prefix', d).textContent = b; num.placeholder = b === 'H' ? '12' : '5.101'; err.textContent = '';
+      if (!n) { hint.textContent = 'Pick the building, then write the room number — for example C + 5.101, or H + 12.'; hint.className = 'hint'; return; }
+      if (!/^\d{1,2}(\.\d{1,3})?$/.test(n)) { hint.textContent = 'Room numbers look like 5.101 (or 12 for a hall in H).'; hint.className = 'hint bad'; return; }
+      const code = (b + n).toUpperCase(), r = cal.rooms.find(x => x.code.toUpperCase() === code);
+      const bk = r && cal.bookings.find(x => x.date === pre.date && x.slotId === 'fifth' && x.roomId === r.id);
+      const blk = r && cal.blocks.find(k => k.date === pre.date && (!k.roomId || k.roomId === r.id) && (!k.slotId || k.slotId === 'fifth'));
+      if (bk) { hint.textContent = `${code} is already booked by ${(cal.clubs.find(c => c.id === bk.clubId) || {}).name || 'another club'} that day.`; hint.className = 'hint bad'; }
+      else if (blk) { hint.textContent = `${code} is blocked that day${blk.reason ? ': ' + blk.reason : ''}.`; hint.className = 'hint bad'; }
+      else { hint.textContent = `${code} is free.`; hint.className = 'hint good'; }
+    };
+    num.oninput = check; $$('[name=building]', d).forEach(x => x.onchange = () => { check(); num.focus(); });
+    setTimeout(() => num.focus(), 50);
+  }
   const rp = $('[name=rep]', d); rp.onchange = () => { $('#bk-rep', d).hidden = !rp.checked; };
   if (rAdd(pre.date, 7) > cal.term.end) rp.closest('label').hidden = true;   // no later week left in the term
   const club = $('[name=clubId]', d); if (club) club.onchange = () => { $('#bk-left', d).innerHTML = leftLine(club.value); };

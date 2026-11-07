@@ -7,6 +7,7 @@ import { newId } from './auth.mjs';
 import { localDate, isDate } from './time.mjs';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export const BUILDINGS = ['A', 'B', 'C', 'D', 'H'];   // fifth-slot rooms are written as one of these + a number
 const toUTC = d => Date.parse(d + 'T12:00:00Z');
 export const addDays = (d, n) => new Date(toUTC(d) + n * 86400000).toISOString().slice(0, 10);
 export const weekday = d => new Date(toUTC(d)).getUTCDay();
@@ -129,6 +130,24 @@ export function registerRooms(x) {
     };
   });
 
+  // Fifth slot: any room, written as a building (A, B, C, D or H) and a number: C + 5.101 = C5.101, H + 12 = H12.
+  // A room nobody has booked before is added to the room list on the spot.
+  async function roomFromCode(body) {
+    const b = String(body.building || '').trim().toUpperCase().replace(/\.$/, '');
+    if (!BUILDINGS.includes(b)) fail(400, 'Choose the building: A, B, C, D or H.', { field: 'building' });
+    const num = String(body.roomNumber || '').replace(/\s+/g, '').replace(/^[A-Za-z]+/, '');   // "C5.101" typed in full is fine too
+    if (!/^\d{1,2}(\.\d{1,3})?$/.test(num)) fail(400, 'Write the room number like 5.101 (or 12 for a hall in H).', { field: 'roomNumber' });
+    const code = b + num;
+    let room = await one('SELECT * FROM sp_rooms WHERE UPPER(code) = $1', [code]);
+    if (room && !Number(room.active)) fail(400, `${code} can't be booked. Ask SAO.`, { field: 'roomNumber' });
+    if (!room) {
+      const id = newId(), sort = Number((await one('SELECT COALESCE(MAX(sort), 0) AS m FROM sp_rooms'))?.m || 0) + 1;
+      await q('INSERT INTO sp_rooms (id, code, building, after_hours, fifth, active, sort) VALUES ($1, $2, $3, 0, 1, 1, $4)', [id, code, b, sort]);
+      room = await one('SELECT * FROM sp_rooms WHERE id = $1', [id]);
+    }
+    return room;
+  }
+
   // ---------- booking ----------
   // One booking, with every rule checked. Used on its own and for each week of a repeat.
   async function createBooking(user, body, { seriesId = null, quiet = false } = {}) {
@@ -140,15 +159,19 @@ export function registerRooms(x) {
     await checkDay(date, user);
     const slot = await one('SELECT * FROM sp_slots WHERE id = $1', [String(body.slotId || '')]);
     if (!slot) fail(400, 'Choose after hours or fifth slot.');
-    const room = await one('SELECT * FROM sp_rooms WHERE id = $1 AND active = 1', [String(body.roomId || '')]);
-    if (!room) fail(400, 'Choose a room.');
-    if (!allows(room, slot.id)) fail(400, `${room.code} can't be booked for the ${slot.name.toLowerCase()}.`);
+    let room;
+    if (slot.id === 'fifth' && (body.building || body.roomNumber)) room = await roomFromCode(body);   // any room, typed by the rep
+    else {
+      room = await one('SELECT * FROM sp_rooms WHERE id = $1 AND active = 1', [String(body.roomId || '')]);
+      if (!room) fail(400, 'Choose a room.');
+      if (!allows(room, slot.id)) fail(400, `${room.code} can't be booked for the ${slot.name.toLowerCase()}.`);
+    }
     const blk = await blockFor(date, room.id, slot.id);
-    if (blk) fail(409, `${room.code} is blocked on ${dayLabel(date)}${blk.reason ? ': ' + blk.reason : ''}.`, { code: 'blocked', suggest: await freeRooms(date, slot.id) });
+    if (blk) fail(409, `${room.code} is blocked on ${dayLabel(date)}${blk.reason ? ': ' + blk.reason : ''}.`, { code: 'blocked', suggest: slot.id === 'after' ? await freeRooms(date, slot.id) : [] });
     const { start, end } = checkTimes(slot, str(body.start, 5), str(body.end, 5));
     const purpose = str(body.purpose, 200);
     const holder = await one(`SELECT b.id, c.name FROM sp_bookings b JOIN sp_clubs c ON c.id = b.club_id WHERE b.date = $1 AND b.room_id = $2 AND b.slot_id = $3 AND b.active = 1`, [date, room.id, slot.id]);
-    if (holder) fail(409, `${room.code} is already booked by ${holder.name} for the ${slot.name.toLowerCase()} on ${dayLabel(date)}.`, { code: 'taken', suggest: await freeRooms(date, slot.id) });
+    if (holder) fail(409, `${room.code} is already booked by ${holder.name} for the ${slot.name.toLowerCase()} on ${dayLabel(date)}.`, { code: 'taken', suggest: slot.id === 'after' ? await freeRooms(date, slot.id) : [] });
     const used = Number((await one('SELECT COUNT(*) AS n FROM sp_bookings WHERE club_id = $1 AND date = $2 AND slot_id = $3 AND active = 1', [club.id, date, slot.id]))?.n || 0);
     const max = Number(slot.max_per_day), override = sao && !!body.override;
     if (used >= max && !override)
@@ -158,7 +181,7 @@ export function registerRooms(x) {
     try {
       await q(`INSERT INTO sp_bookings (id, date, room_id, slot_id, club_id, created_by, start_time, end_time, purpose, active, override, created_at, series_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11, $12)`, [id, date, room.id, slot.id, club.id, user.id, start, end, purpose || null, used >= max ? 1 : 0, now(), seriesId]);
-    } catch (e) { if (e && (e.code === '23505' || /UNIQUE/i.test(e.message || ''))) fail(409, `${room.code} was just booked by another club. Choose another room.`, { code: 'taken', suggest: await freeRooms(date, slot.id) }); throw e; }
+    } catch (e) { if (e && (e.code === '23505' || /UNIQUE/i.test(e.message || ''))) fail(409, `${room.code} was just booked by another club. Choose another room.`, { code: 'taken', suggest: slot.id === 'after' ? await freeRooms(date, slot.id) : [] }); throw e; }
     await audit(user, 'booking.create', `booking:${id}`, null, { club: club.name, room: room.code, slot: slot.name, date: ddmmyyyy(date), start, end, override: used >= max });
     if (sao && user.club_id !== club.id && !quiet) await notifyClub(club.id, `SAO booked ${room.code} (${slot.name}) for your club on ${dayLabel(date)}.`, '#/rooms/mine');
     return { id, used: used + 1, max, club, room, slot, date };
@@ -187,7 +210,7 @@ export function registerRooms(x) {
         skipped.push({ date: d, reason: e.message });
       }
     }
-    const room = await one('SELECT code FROM sp_rooms WHERE id = $1', [String(body.roomId)]);
+    const room = await one('SELECT r.code FROM sp_bookings b JOIN sp_rooms r ON r.id = b.room_id WHERE b.id = $1', [booked[0].id]);
     const clubId = user.role === 'sao' ? String(body.clubId || '') : user.club_id;
     if (user.role === 'sao' && user.club_id !== clubId)
       await notifyClub(clubId, `SAO booked ${room?.code || 'a room'} for your club every week: ${booked.length} week${booked.length === 1 ? '' : 's'} from ${dayLabel(first)}.`, '#/rooms/mine');

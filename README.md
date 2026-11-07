@@ -90,6 +90,7 @@ Built from *Club Room Booking Platform — Requirements (6 Nov 2026)*; it replac
 - **Admin > Rooms:** term, slot times and limits, rooms (add, edit, archive), blocks, CSV export in the old sheet's layout,
   and the security Google Sheet.
 - Slot times: after hours 17:30–20:00 (shown first), fifth slot 15:15–17:30; SAO can change them in Admin > Rooms.
+- **Fifth-slot rooms are typed in**: the club picks the building (A, B, C, D or H) and writes the room number (e.g. C5.101). Any room works; a room the site has never seen is added automatically. One club per room per slot, and the page checks live whether it is free. After hours keeps its fixed list of rooms.
 - Notifications are inside the site (email would need an email service).
 
 ### Security Google Sheet

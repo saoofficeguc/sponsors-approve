@@ -458,6 +458,28 @@ test('rooms: a club cancels its own booking (freeing the room at once), never an
   assert.ok((await call('GET', '/api/bookings/mine', null, A)).data.some(b => b.id === mine.id && !b.active));
 });
 
+test('rooms: fifth-slot rooms are typed as a building (A, B, C, D, H) and a number', async () => {
+  const d = nextDay(3);   // a Wednesday
+  const ok = await call('POST', '/api/bookings', { date: d, slotId: 'fifth', building: 'D', roomNumber: '4.201', purpose: 'Workshop' }, A);
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  // the room now exists, and another club typing it (in any form) is told who has it
+  const again = await call('POST', '/api/bookings', { date: d, slotId: 'fifth', building: 'd.', roomNumber: ' D4.201 ' }, B);
+  assert.equal(again.status, 409); assert.ok(again.data.error.startsWith('D4.201 is already booked by ' + clubs[0].name));
+  assert.deepEqual(again.data.suggest, []);
+  // a hall in H, and an existing listed room typed by hand
+  assert.equal((await call('POST', '/api/bookings', { date: d, slotId: 'fifth', building: 'H', roomNumber: '10' }, B)).status, 200);
+  const c = (await call('GET', '/api/rooms/calendar?from=' + d + '&to=' + d)).data;
+  assert.ok(c.rooms.some(r => r.code === 'D4.201' && r.fifth && !r.afterHours));
+  assert.equal(c.rooms.filter(r => r.code === 'H10').length, 1);   // not added twice
+  // bad buildings and numbers
+  for (const [b, n, field] of [['Z', '1.01', 'building'], ['', '1.01', 'building'], ['C', 'abc', 'roomNumber'], ['C', '5.10101', 'roomNumber'], ['C', '', 'roomNumber']]) {
+    const r = await call('POST', '/api/bookings', { date: d, slotId: 'fifth', building: b, roomNumber: n }, C);
+    assert.equal(r.status, 400, b + n); assert.equal(r.data.field, field, b + n);
+  }
+  // after hours still uses the fixed room list
+  assert.equal((await call('POST', '/api/bookings', { date: d, slotId: 'after', building: 'D', roomNumber: '4.201' }, C)).data.error, 'Choose a room.');
+});
+
 test('rooms: weekly repeats book every week they can, list the weeks they can\'t, and cancel together', async () => {
   const saved = clock; clock = Date.parse('2026-10-04T08:00:00Z');   // early in term, so all six weeks fit
   try {
